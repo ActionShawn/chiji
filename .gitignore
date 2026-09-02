@@ -1,0 +1,24 @@
+# Maven / Java
+target/
+*.class
+*.jar
+!.mvn/wrapper/maven-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.settings/
+.classpath
+.project
+
+# 日志与本地产物
+logs/
+*.log
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 本地敏感配置（如需提交请在仓库外管理）
+.env

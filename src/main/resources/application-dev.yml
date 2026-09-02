@@ -1,0 +1,28 @@
+# D:\Java Work Place\personal-develop\teeth-trace\server\src\main\resources\application-dev.yml
+# 开发环境：打印 SQL 与调试日志、开启接口文档
+spring:
+  datasource:
+    url: jdbc:mysql://${MYSQL_ADDRESS:${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}}/teeth_trace?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+  # Redis 密码不写默认值（公开仓库禁止明文）：本地联调请用环境变量 REDIS_PASSWORD 注入
+  # （本机 Redis 已在 redis.windows.conf 中设置 requirepass，开发启动前先在 IDE Run Configuration 配置）
+  data:
+    redis:
+      password: ${REDIS_PASSWORD:}
+
+mybatis-plus:
+  configuration:
+    # 开发环境将 SQL 打印到控制台
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+
+logging:
+  level:
+    com.chiji: debug
+
+springdoc:
+  api-docs:
+    enabled: true
+  swagger-ui:
+    enabled: true
+
+knife4j:
+  enable: true
