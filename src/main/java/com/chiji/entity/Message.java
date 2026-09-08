@@ -62,7 +62,11 @@ public class Message {
     /** 正文（形如「距离上次记录已经过去22小时…」） */
     private String body;
 
-    /** 是否已读（默认 false；对应前端 status unread/read） */
+    /**
+     * 是否已读（默认 false；对应前端 status unread/read）。
+     * {@code read} 是 MySQL 保留字，需反引号转义，否则 MP 生成的无引号 SQL 会语法报错。
+     */
+    @TableField("`read`")
     private Boolean read;
 
     /** 创建时间，插入时自动填充 */
