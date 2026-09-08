@@ -6,8 +6,15 @@ import com.baomidou.mybatisplus.annotation.IEnum;
 /**
  * 消息分类枚举。
  * <p>
- * 对应 {@code tagStyle} 的四种消息分类；{@code code} 与枚举 {@code name()} 保持一致。
- * 注意：FELLOW_TRAVELER（同路人）仅是消息分类标识，本后端不承载任何社区/社交功能。
+ * 对应信箱消息的 chip 分类：系统关怀（蓝）与佩戴提醒（沙）。{@code code} 与枚举
+ * {@code name()} 保持一致。
+ * 注意：
+ * <ul>
+ *   <li>FELLOW_TRAVELER（同路人）仅是消息分类标识，本后端不承载任何社区/社交功能</li>
+ *   <li>佩戴时长功能的提醒统一挂到 {@link #WEAR}（佩戴组）与 {@link #SYSTEM_CARE}（矫正进度组），
+ *       由 {@link com.chiji.enums.WearReminderTypeEnum#toCategory()} 映射；RECORD_REMINDER /
+ *       STAGE_UPDATE / FELLOW_TRAVELER 为存量分类，保留兼容</li>
+ * </ul>
  */
 public enum MessageCategoryEnum implements IEnum<String> {
 
@@ -17,8 +24,10 @@ public enum MessageCategoryEnum implements IEnum<String> {
     STAGE_UPDATE("STAGE_UPDATE", "阶段更新"),
     /** 同路人（仅消息分类标识，无社交后端） */
     FELLOW_TRAVELER("FELLOW_TRAVELER", "同路人"),
-    /** 系统关怀 */
-    SYSTEM_CARE("SYSTEM_CARE", "系统关怀");
+    /** 系统关怀（矫正进度组提醒落此分类） */
+    SYSTEM_CARE("SYSTEM_CARE", "系统关怀"),
+    /** 佩戴提醒（佩戴打卡组提醒落此分类） */
+    WEAR("WEAR", "佩戴提醒");
 
     /** 编码（与枚举 name() 一致） */
     private final String code;

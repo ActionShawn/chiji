@@ -17,8 +17,10 @@ import java.time.LocalTime;
 /**
  * 用户设置实体（一对一扩展 User）。
  * <p>
- * 存储主题模式、字号、云同步开关与每日提醒时间。约束：{@code userId} 唯一
- * （UNIQUE INDEX：uk_user_setting_user）。关系：1 设置 → 1 用户。
+ * 存储主题模式、字号、云同步开关、每日提醒时间，以及佩戴目标与通知偏好（单值部分）。
+ * 约束：{@code userId} 唯一（UNIQUE INDEX：uk_user_setting_user）。关系：1 设置 → 1 用户。
+ * 每提醒类型的开关明细不在此表（见 {@link com.chiji.entity.UserNotificationConfig}）；
+ * 该行可能不存在，读取方需按默认值兜底并在首次写时创建。
  */
 @Getter
 @Setter
@@ -44,6 +46,30 @@ public class UserSetting {
 
     /** 每日提醒时间（可选，未设置为 null） */
     private LocalTime reminderTime;
+
+    /** 每日佩戴目标（秒，默认 20h=72000；可调 18.0–22.0h，步进 0.5h） */
+    private Integer goalSec;
+
+    /** 通知总开关：false 关闭（不再生成/归档提醒消息） */
+    private Boolean notifMaster;
+
+    /** 弹窗提醒开关：false 关闭（提醒仅信箱可见） */
+    private Boolean notifPopup;
+
+    /** 信箱红点/角标开关：false 关闭 */
+    private Boolean notifBadge;
+
+    /** 通知预设模式：NotificationPresetEnum.name()，STANDARD(标准)/IMPORTANT_ONLY(仅重要)/CUSTOM(自定义) */
+    private String presetMode;
+
+    /** 勿扰时段开关（仅抑制即时弹窗，信箱消息照常归档） */
+    private Boolean dndEnabled;
+
+    /** 勿扰开始时间（默认 22:00） */
+    private LocalTime dndStart;
+
+    /** 勿扰结束时间（默认 08:00） */
+    private LocalTime dndEnd;
 
     /** 创建时间，插入时自动填充 */
     @TableField(fill = FieldFill.INSERT)

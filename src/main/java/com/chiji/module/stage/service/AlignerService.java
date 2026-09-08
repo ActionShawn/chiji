@@ -1,10 +1,12 @@
 package com.chiji.module.stage.service;
 
+import com.chiji.entity.Aligner;
 import com.chiji.entity.Stage;
 import com.chiji.module.stage.dto.AlignerTimeUpdateRequest;
 import com.chiji.module.stage.dto.RevertAlignerRequest;
 import com.chiji.module.stage.vo.AlignerNodeVO;
 
+import java.time.LocalDate;
 import java.util.List;
 
 /**
@@ -96,4 +98,30 @@ public interface AlignerService {
      * @return 更新后的节点列表（供前端刷新展示）
      */
     List<AlignerNodeVO> updateAlignerTime(Long userId, Long alignerId, AlignerTimeUpdateRequest req);
+
+    /**
+     * 查询用户「当前实际佩戴」的牙套副。
+     * <p>
+     * 规则：取该用户状态为 ACTIVE 的阶段（同一时间至多一个），再取其内 state=ACTIVE 的副；
+     * 任一环节缺失返回 null（例如阶段已结束或刚建阶段尚未预排期）。
+     * 供佩戴时长模块在打卡/统计时标记会话归属（跨模块公共查询，不区分记录模式）。
+     *
+     * @param userId 用户 ID
+     * @return 当前 ACTIVE 副；无则 null
+     */
+    Aligner findActiveAligner(Long userId);
+
+    /**
+     * 查询用户在某个自然日「当时佩戴」的牙套副（用于佩戴补录归属历史时段）。
+     * <p>
+     * 规则：取该用户状态为 ACTIVE 的阶段（同一时间至多一个），在其中取
+     * {@code startDate <= date} 且（state=ACTIVE 或 {@code endDate >= date}）的副；
+     * 多个匹配时取副序号最大者（补录时段通常落在最近的副）。越界/无匹配返回 null
+     * （例如补录日期早于该阶段第一副开始日期，或所在阶段早已结束后又开了新阶段）。
+     *
+     * @param userId 用户 ID
+     * @param date   佩戴发生的那天（自然日）
+     * @return 当时佩戴的副；无则 null
+     */
+    Aligner findWornAligner(Long userId, LocalDate date);
 }

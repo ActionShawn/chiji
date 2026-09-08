@@ -1,4 +1,4 @@
-package com.chiji.module.stage.support;
+package com.chiji.module.stage.service.assembler;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.chiji.entity.Aligner;
@@ -9,6 +9,7 @@ import com.chiji.enums.AlignerFilmEnum;
 import com.chiji.enums.AlignerStateEnum;
 import com.chiji.module.stage.mapper.RecordMediaMapper;
 import com.chiji.module.stage.mapper.TimelineRecordMapper;
+import com.chiji.module.stage.support.StageModeSupport;
 import com.chiji.module.stage.vo.AlignerNodeVO;
 import com.chiji.module.stage.vo.AlignerThumbVO;
 import org.springframework.stereotype.Component;

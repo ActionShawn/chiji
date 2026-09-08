@@ -1,5 +1,6 @@
 package com.chiji.module.stage.vo;
 
+import com.chiji.module.wear.vo.WearTopVO;
 import lombok.Builder;
 
 import java.util.List;
@@ -15,6 +16,7 @@ import java.util.List;
  * @param activeStageIndex   当前阶段在 stages 数组中的下标（无 current 阶段时为 -1）
  * @param activeAlignerIndex 当前佩戴副在 alignerNodes 数组中的下标（无时为 -1，供首页直定位当前副）
  * @param alignerNodes       当前阶段的牙套节点列表（按 num 升序）
+ * @param wearTop            佩戴时长概览（由 HomeController 合并佩戴模块数据；无 ACTIVE 副时为 null）
  */
 @Builder
 public record HomeSummaryVO(
@@ -22,6 +24,7 @@ public record HomeSummaryVO(
         List<StageVO> stages,
         Integer activeStageIndex,
         Integer activeAlignerIndex,
-        List<AlignerNodeVO> alignerNodes
+        List<AlignerNodeVO> alignerNodes,
+        WearTopVO wearTop
 ) {
 }

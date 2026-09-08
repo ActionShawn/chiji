@@ -9,7 +9,7 @@ import com.chiji.enums.StageStatusEnum;
 import com.chiji.module.stage.mapper.AlignerMapper;
 import com.chiji.module.stage.mapper.StageMapper;
 import com.chiji.module.stage.service.HomeService;
-import com.chiji.module.stage.support.AlignerNodeAssembler;
+import com.chiji.module.stage.service.assembler.AlignerNodeAssembler;
 import com.chiji.module.stage.support.StageModeSupport;
 import com.chiji.module.stage.vo.AlignerNodeVO;
 import com.chiji.module.stage.vo.HomeBannerVO;

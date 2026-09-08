@@ -4,6 +4,8 @@ import com.chiji.common.core.result.R;
 import com.chiji.module.auth.util.SecurityUtil;
 import com.chiji.module.stage.service.HomeService;
 import com.chiji.module.stage.vo.HomeSummaryVO;
+import com.chiji.module.wear.service.WearService;
+import com.chiji.module.wear.vo.WearTopVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -24,6 +26,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class HomeController {
 
     private final HomeService homeService;
+    private final WearService wearService;
 
     /**
      * 获取首页聚合数据（按记录模式过滤）。
@@ -38,6 +41,15 @@ public class HomeController {
     @GetMapping("/summary")
     public R<HomeSummaryVO> getHomeSummary(@RequestParam(required = false) String mode) {
         Long userId = SecurityUtil.getCurrentUserId();
-        return R.ok(homeService.getHomeSummary(userId, mode));
+        HomeSummaryVO base = homeService.getHomeSummary(userId, mode);
+        // 合并佩戴时长概览：无 ACTIVE 副时 wearTop 为 null（前端不渲染佩戴条）
+        WearTopVO wearTop = wearService.wearTop(userId);
+        return R.ok(new HomeSummaryVO(
+                base.banner(),
+                base.stages(),
+                base.activeStageIndex(),
+                base.activeAlignerIndex(),
+                base.alignerNodes(),
+                wearTop));
     }
 }

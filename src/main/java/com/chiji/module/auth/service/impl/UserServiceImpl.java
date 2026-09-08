@@ -4,12 +4,15 @@ import com.chiji.common.core.exception.BusinessException;
 import com.chiji.common.core.exception.ErrorCode;
 import com.chiji.entity.User;
 import com.chiji.module.auth.dto.UpdateUserProfileRequest;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.chiji.module.auth.mapper.UserMapper;
 import com.chiji.module.auth.service.UserService;
 import com.chiji.module.auth.vo.UserProfileVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.util.List;
 
 /**
  * 用户资料服务实现。
@@ -51,6 +54,16 @@ public class UserServiceImpl implements UserService {
 
         userMapper.updateById(user);
         return toVO(user);
+    }
+
+    @Override
+    public List<Long> listAllUserIds() {
+        return userMapper.selectList(new LambdaQueryWrapper<User>()
+                        .select(User::getId)
+                        .orderByAsc(User::getId))
+                .stream()
+                .map(User::getId)
+                .toList();
     }
 
     private User requireUser(Long userId) {

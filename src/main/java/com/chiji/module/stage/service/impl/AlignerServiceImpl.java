@@ -14,7 +14,7 @@ import com.chiji.module.stage.dto.RevertAlignerRequest;
 import com.chiji.module.stage.mapper.AlignerMapper;
 import com.chiji.module.stage.mapper.StageMapper;
 import com.chiji.module.stage.service.AlignerService;
-import com.chiji.module.stage.support.AlignerNodeAssembler;
+import com.chiji.module.stage.service.assembler.AlignerNodeAssembler;
 import com.chiji.module.stage.support.StageModeSupport;
 import com.chiji.module.stage.vo.AlignerNodeVO;
 import lombok.RequiredArgsConstructor;
@@ -365,6 +365,44 @@ public class AlignerServiceImpl implements AlignerService {
                 .eq(Aligner::getStageId, anchor.getStageId())
                 .orderByAsc(Aligner::getNum));
         return alignerNodeAssembler.toNodeList(all);
+    }
+
+    @Override
+    public Aligner findActiveAligner(Long userId) {
+        Stage activeStage = stageMapper.selectOne(new LambdaQueryWrapper<Stage>()
+                .eq(Stage::getUserId, userId)
+                .eq(Stage::getStatus, StageStatusEnum.ACTIVE.getCode())
+                .last("LIMIT 1"));
+        if (activeStage == null) {
+            return null;
+        }
+        return alignerMapper.selectOne(new LambdaQueryWrapper<Aligner>()
+                .eq(Aligner::getStageId, activeStage.getId())
+                .eq(Aligner::getState, AlignerStateEnum.ACTIVE.getCode())
+                .last("LIMIT 1"));
+    }
+
+    @Override
+    public Aligner findWornAligner(Long userId, LocalDate date) {
+        if (date == null) {
+            return null;
+        }
+        Stage activeStage = stageMapper.selectOne(new LambdaQueryWrapper<Stage>()
+                .eq(Stage::getUserId, userId)
+                .eq(Stage::getStatus, StageStatusEnum.ACTIVE.getCode())
+                .last("LIMIT 1"));
+        if (activeStage == null) {
+            return null;
+        }
+        // 候选：已排期的副中 startDate <= date，且（ACTIVE 不受 endDate 约束 或 DONE 已到 endDate）
+        return alignerMapper.selectOne(new LambdaQueryWrapper<Aligner>()
+                .eq(Aligner::getStageId, activeStage.getId())
+                .isNotNull(Aligner::getStartDate)
+                .le(Aligner::getStartDate, date)
+                .and(w -> w.eq(Aligner::getState, AlignerStateEnum.ACTIVE.getCode())
+                        .or(q -> q.isNotNull(Aligner::getEndDate).ge(Aligner::getEndDate, date)))
+                .orderByDesc(Aligner::getNum)
+                .last("LIMIT 1"));
     }
 
     /**
