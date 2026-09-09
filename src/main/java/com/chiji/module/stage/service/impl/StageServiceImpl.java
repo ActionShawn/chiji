@@ -8,6 +8,7 @@ import com.chiji.enums.RecordModeEnum;
 import com.chiji.enums.StageStatusEnum;
 import com.chiji.common.core.exception.BusinessException;
 import com.chiji.common.core.exception.ErrorCode;
+import com.chiji.module.message.service.ProgressReminderService;
 import com.chiji.module.stage.dto.CreateStageRequest;
 import com.chiji.module.stage.dto.UpdateStageStatusRequest;
 import com.chiji.module.stage.mapper.AlignerMapper;
@@ -47,6 +48,7 @@ public class StageServiceImpl implements StageService {
     private final AlignerMapper alignerMapper;
     private final AlignerNodeAssembler alignerNodeAssembler;
     private final AlignerService alignerService;
+    private final ProgressReminderService progressReminderService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -130,6 +132,7 @@ public class StageServiceImpl implements StageService {
 
         // 切到 ACTIVE：先把当前用户该模式下其它 ACTIVE 阶段置为 ENDED，保持「同模式内唯一启用」
         // （模式即工作台，单模 / 双模的启用阶段互不影响）
+        boolean wasActive = StageStatusEnum.ACTIVE.getCode().equals(stage.getStatus());
         if (StageStatusEnum.ACTIVE.getCode().equals(targetStatus)) {
             endActiveStages(userId, stage.getMode() != null ? stage.getMode() : RecordModeEnum.CLEAR_SINGLE.getCode());
         }
@@ -139,7 +142,16 @@ public class StageServiceImpl implements StageService {
                 .set(Stage::getStatus, targetStatus));
 
         stage.setStatus(targetStatus);
-        log.info("更新阶段状态, userId={}, stageId={}, {}->{}", userId, stageId, stage.getStatus(), targetStatus);
+        log.info("更新阶段状态, userId={}, stageId={}, {}->{}", userId, stageId, targetStatus, stage.getStatus());
+
+        // 显式结束启用阶段（至少走完一副）时归档「阶段结束」里程碑；自然戴完走换副路径，同日去重兜底
+        if (wasActive && StageStatusEnum.ENDED.getCode().equals(targetStatus)) {
+            try {
+                progressReminderService.stageEndedMilestone(userId, stageId);
+            } catch (Exception e) {
+                log.warn("阶段结束里程碑消息归档失败, userId={}, stageId={}", userId, stageId, e);
+            }
+        }
         return toStageVO(stage);
     }
 

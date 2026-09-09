@@ -5,6 +5,7 @@ import com.chiji.enums.WearLevelEnum;
 import com.chiji.enums.WearReminderTypeEnum;
 import com.chiji.module.auth.service.UserService;
 import com.chiji.module.message.service.NotificationSettingService;
+import com.chiji.module.message.service.ProgressReminderService;
 import com.chiji.module.message.service.ReminderNotifyService;
 import com.chiji.module.stage.service.AlignerService;
 import com.chiji.module.wear.service.WearQueryService;
@@ -42,6 +43,7 @@ public class WearScheduledJob {
     private final WearQueryService wearQueryService;
     private final NotificationSettingService notificationSettingService;
     private final ReminderNotifyService reminderNotifyService;
+    private final ProgressReminderService progressReminderService;
     private final AlignerService alignerService;
     private final UserService userService;
 
@@ -69,9 +71,13 @@ public class WearScheduledJob {
                         yesterday,
                         "昨日佩戴结算",
                         "昨天佩戴 " + label + (levelDesc.isBlank() ? "" : "，" + levelDesc));
-                log.info("佩戴每日结算 job, userId={}, date={}, wearSec={}, level={}, notified={}",
+                // 结算 FULL 时顺带判定连续达标成就（7/14/30 天，同日去重由 notify 保证）
+                boolean streakSent = row != null
+                        && WearLevelEnum.FULL.getCode().equals(row.getLevel())
+                        && progressReminderService.fullStreakMilestone(userId, yesterday);
+                log.info("佩戴每日结算 job, userId={}, date={}, wearSec={}, level={}, notified={}, streakNotified={}",
                         userId, yesterday, row == null ? 0 : row.getWearSec(),
-                        row == null ? null : row.getLevel(), sent);
+                        row == null ? null : row.getLevel(), sent, streakSent);
                 done++;
             } catch (Exception e) {
                 failed++;

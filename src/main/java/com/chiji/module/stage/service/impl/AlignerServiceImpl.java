@@ -9,6 +9,7 @@ import com.chiji.entity.Stage;
 import com.chiji.enums.AlignerFilmEnum;
 import com.chiji.enums.AlignerStateEnum;
 import com.chiji.enums.StageStatusEnum;
+import com.chiji.module.message.service.ProgressReminderService;
 import com.chiji.module.stage.dto.AlignerTimeUpdateRequest;
 import com.chiji.module.stage.dto.RevertAlignerRequest;
 import com.chiji.module.stage.mapper.AlignerMapper;
@@ -63,6 +64,7 @@ public class AlignerServiceImpl implements AlignerService {
     private final AlignerMapper alignerMapper;
     private final StageMapper stageMapper;
     private final AlignerNodeAssembler alignerNodeAssembler;
+    private final ProgressReminderService progressReminderService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -187,7 +189,16 @@ public class AlignerServiceImpl implements AlignerService {
                     userId, current.getStageId(), current.getNum(), next.getNum(), repackCount);
         }
 
-        // 5. 返回更新后的节点列表
+        // 5. 归档完成里程碑（每完成一副/进度分档；最后一副自动并入「阶段完成」文案）
+        //    与换副同事务；门控与同日去重由 ProgressReminderService/ReminderNotifyService 处理
+        try {
+            progressReminderService.alignerFinishedMilestone(userId, stage.getId(), current.getNum());
+        } catch (Exception e) {
+            log.warn("完成里程碑消息归档失败, userId={}, stageId={}, alignerNum={}",
+                    userId, stage.getId(), current.getNum(), e);
+        }
+
+        // 6. 返回更新后的节点列表
         List<Aligner> all = alignerMapper.selectList(new LambdaQueryWrapper<Aligner>()
                 .eq(Aligner::getStageId, current.getStageId())
                 .orderByAsc(Aligner::getNum));
