@@ -5,7 +5,7 @@ import java.util.List;
 /**
  * 佩戴统计（/api/wear/stats）。
  *
- * @param range         天数窗口：LAST_7 / LAST_30
+ * @param range         统计口径：LAST_7（近 7 天）/ CURRENT_MONTH（自然月 1 号→今天）/ LAST_30（近 30 天）
  * @param dates         逐日 yyyy-MM-dd（正序）
  * @param daySeconds    逐日佩戴秒（无记录日为 0，长度同 dates）
  * @param goalSec       目标秒

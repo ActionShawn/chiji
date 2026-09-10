@@ -90,10 +90,10 @@ public interface WearService {
     GoalVO updateGoal(Long userId, Double goalHours);
 
     /**
-     * 佩戴统计（LAST_7 / LAST_30 天窗口，含今天）。
+     * 佩戴统计（含今天；口径见 range）。
      *
      * @param userId 用户 ID
-     * @param range  LAST_7 / LAST_30
+     * @param range  LAST_7（近 7 天）/ CURRENT_MONTH（自然月 1 号→今天）/ LAST_30（近 30 天）
      * @return 统计视图
      */
     WearStatsVO stats(Long userId, String range);

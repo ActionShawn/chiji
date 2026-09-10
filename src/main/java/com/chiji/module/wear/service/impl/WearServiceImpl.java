@@ -253,15 +253,21 @@ public class WearServiceImpl implements WearService {
     public WearStatsVO stats(Long userId, String range) {
         LocalDateTime now = WearTimes.now();
         LocalDate today = now.toLocalDate();
-        int days;
-        if ("LAST_30".equalsIgnoreCase(range)) {
-            days = 30;
+        // 三种口径：LAST_7（周档）/ CURRENT_MONTH（月档，自然月 1 号→今天）/ LAST_30（兼容旧调用）
+        String normalized;
+        LocalDate from;
+        if ("CURRENT_MONTH".equalsIgnoreCase(range)) {
+            normalized = "CURRENT_MONTH";
+            from = today.withDayOfMonth(1);
+        } else if ("LAST_30".equalsIgnoreCase(range)) {
+            normalized = "LAST_30";
+            from = today.minusDays(29);
         } else if ("LAST_7".equalsIgnoreCase(range) || range == null || range.isBlank()) {
-            days = 7;
+            normalized = "LAST_7";
+            from = today.minusDays(6);
         } else {
-            throw new BusinessException(ErrorCode.WEAR_PARAM_INVALID, "统计范围应为 LAST_7 / LAST_30");
+            throw new BusinessException(ErrorCode.WEAR_PARAM_INVALID, "统计范围应为 LAST_7 / CURRENT_MONTH / LAST_30");
         }
-        LocalDate from = today.minusDays(days - 1L);
         List<WearSession> sessions = sessionsOverlapping(userId, WearTimes.startOf(from), now);
         Map<LocalDate, WearDayMath.DaySecs> dayMap = WearDayMath.distribute(sessions, from, today, now);
 
@@ -295,7 +301,7 @@ public class WearServiceImpl implements WearService {
             }
         }
         return new WearStatsVO(
-                days == 30 ? "LAST_30" : "LAST_7",
+                normalized,
                 dates,
                 secs,
                 goal,
@@ -421,7 +427,9 @@ public class WearServiceImpl implements WearService {
                     WearTimes.toEpochMillis(clip[0]),
                     clip[1] == null ? null : WearTimes.toEpochMillis(clip[1]),
                     Math.max(0, dur),
-                    wearing
+                    wearing,
+                    // 会话真实起始：跨夜段据此刻画「昨 21:03」文案（startTime 已被裁剪到今日 00:00）
+                    WearTimes.toEpochMillis(s.getStartedAt())
             ));
         }
 

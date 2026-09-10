@@ -6,10 +6,11 @@ package com.chiji.module.wear.vo;
  * @param id         会话 id
  * @param source     MANUAL / MAKEUP
  * @param makeupFor  校准补录目标日期 yyyy-MM-dd（补录段可见）
- * @param startTime  会话在今日区间的起始 epoch 毫秒
+ * @param startTime  会话在今日区间的起始 epoch 毫秒（跨夜段被裁剪到今日 00:00）
  * @param endTime    会话在今日区间的结束 epoch 毫秒（佩戴中为 null）
  * @param durationSec 今日区间内归属秒
  * @param wearing    是否佩戴中
+ * @param originStartTime 会话真实起始 epoch 毫秒（未跨夜时与 startTime 相同；跨夜段据此展示「昨 21:03」）
  */
 public record TodaySessionVO(
         Long id,
@@ -18,6 +19,7 @@ public record TodaySessionVO(
         Long startTime,
         Long endTime,
         Long durationSec,
-        Boolean wearing
+        Boolean wearing,
+        Long originStartTime
 ) {
 }

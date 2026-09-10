@@ -80,7 +80,7 @@ public class WearController {
         return R.ok(wearService.updateGoal(SecurityUtil.getCurrentUserId(), request.goalHours()));
     }
 
-    @Operation(summary = "佩戴统计", description = "range = LAST_7 / LAST_30（含今天）")
+    @Operation(summary = "佩戴统计", description = "range = LAST_7 / CURRENT_MONTH / LAST_30（含今天）")
     @GetMapping("/stats")
     public R<WearStatsVO> stats(@RequestParam(required = false) String range) {
         return R.ok(wearService.stats(SecurityUtil.getCurrentUserId(), range));
