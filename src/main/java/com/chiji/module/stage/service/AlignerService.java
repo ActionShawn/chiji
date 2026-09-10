@@ -112,12 +112,12 @@ public interface AlignerService {
     Aligner findActiveAligner(Long userId);
 
     /**
-     * 查询用户在某个自然日「当时佩戴」的牙套副（用于佩戴补录归属历史时段）。
+     * 查询用户在某个自然日「当时佩戴」的牙套副（用于日常打卡归属与补录/回填历史时段）。
      * <p>
-     * 规则：取该用户状态为 ACTIVE 的阶段（同一时间至多一个），在其中取
-     * {@code startDate <= date} 且（state=ACTIVE 或 {@code endDate >= date}）的副；
-     * 多个匹配时取副序号最大者（补录时段通常落在最近的副）。越界/无匹配返回 null
-     * （例如补录日期早于该阶段第一副开始日期，或所在阶段早已结束后又开了新阶段）。
+     * 规则：在该用户<b>全部阶段（含已结束）</b>中取 {@code startDate <= date} 且
+     * （state=ACTIVE 或 {@code endDate >= date}）的副；跨模式阶段同期进行等多个匹配时，
+     * 取开始日期最近、副序号最大者（最近启用的副）。无匹配返回 null
+     * （例如该日期早于所有阶段第一副开始日期，或当时没有任何已排期的副）。
      *
      * @param userId 用户 ID
      * @param date   佩戴发生的那天（自然日）

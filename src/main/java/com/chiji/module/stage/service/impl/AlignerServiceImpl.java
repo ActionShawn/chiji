@@ -398,20 +398,27 @@ public class AlignerServiceImpl implements AlignerService {
         if (date == null) {
             return null;
         }
-        Stage activeStage = stageMapper.selectOne(new LambdaQueryWrapper<Stage>()
+        // 跨全部阶段（含已结束）归属：补录历史日期、日常打卡与旧会话回填时，
+        // 佩戴当天所在阶段可能已结束（甚至跨模式开了新阶段），只查当前 ACTIVE 阶段会归 null
+        List<Stage> stages = stageMapper.selectList(new LambdaQueryWrapper<Stage>()
                 .eq(Stage::getUserId, userId)
-                .eq(Stage::getStatus, StageStatusEnum.ACTIVE.getCode())
-                .last("LIMIT 1"));
-        if (activeStage == null) {
+                .select(Stage::getId));
+        if (stages == null || stages.isEmpty()) {
             return null;
         }
-        // 候选：已排期的副中 startDate <= date，且（ACTIVE 不受 endDate 约束 或 DONE 已到 endDate）
+        List<Long> stageIds = new ArrayList<>(stages.size());
+        for (Stage st : stages) {
+            stageIds.add(st.getId());
+        }
+        // 候选：已排期的副中 startDate <= date，且（ACTIVE 不受 endDate 约束 或 DONE 已到 endDate）；
+        // 跨模式阶段同期进行导致多个匹配时，取开始日期最近、序号最大者（最近启用的副）
         return alignerMapper.selectOne(new LambdaQueryWrapper<Aligner>()
-                .eq(Aligner::getStageId, activeStage.getId())
+                .in(Aligner::getStageId, stageIds)
                 .isNotNull(Aligner::getStartDate)
                 .le(Aligner::getStartDate, date)
                 .and(w -> w.eq(Aligner::getState, AlignerStateEnum.ACTIVE.getCode())
                         .or(q -> q.isNotNull(Aligner::getEndDate).ge(Aligner::getEndDate, date)))
+                .orderByDesc(Aligner::getStartDate)
                 .orderByDesc(Aligner::getNum)
                 .last("LIMIT 1"));
     }

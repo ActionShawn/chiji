@@ -83,8 +83,11 @@ public class WearServiceImpl implements WearService {
         if ("WEAR_ON".equals(action)) {
             if (open == null) {
                 WearSession s = newSession(userId, WearSourceEnum.MANUAL, null, WearTimes.now(), null);
+                // 归属今天正在佩戴的副（跨全部阶段匹配；无已排期 ACTIVE 副时为 null）
+                com.chiji.entity.Aligner worn = alignerService.findWornAligner(userId, WearTimes.today());
+                s.setAlignerId(worn == null ? null : worn.getId());
                 wearSessionMapper.insert(s);
-                log.info("佩戴打卡开, userId={}, sessionId={}", userId, s.getId());
+                log.info("佩戴打卡开, userId={}, sessionId={}, alignerId={}", userId, s.getId(), s.getAlignerId());
             }
             // 已有佩戴中会话则幂等返回（不重复开段）
         } else if ("WEAR_OFF".equals(action)) {
