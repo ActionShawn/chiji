@@ -107,8 +107,8 @@ public class WearScheduledJob {
                     skipped++;
                     continue;
                 }
-                // 没有当前佩戴副（无进行中矫正/阶段未排期）不提醒
-                if (alignerService.findActiveAligner(userId) == null) {
+                // 没有当前佩戴副（无进行中矫正/阶段未排期）不提醒；定时任务无模式上下文，任一模式有 ACTIVE 即算
+                if (alignerService.findActiveAligner(userId, null) == null) {
                     skipped++;
                     continue;
                 }

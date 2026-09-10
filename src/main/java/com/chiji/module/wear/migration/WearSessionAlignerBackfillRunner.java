@@ -56,7 +56,8 @@ public class WearSessionAlignerBackfillRunner implements ApplicationRunner {
         int fixed = 0;
         int skipped = 0;
         for (WearSession s : orphans) {
-            Aligner worn = alignerService.findWornAligner(s.getUserId(), s.getStartedAt().toLocalDate());
+            // 历史会话无模式上下文，mode 传 null：跨全部阶段 best-effort 归属
+            Aligner worn = alignerService.findWornAligner(s.getUserId(), s.getStartedAt().toLocalDate(), null);
             if (worn == null) {
                 skipped++;
                 continue;

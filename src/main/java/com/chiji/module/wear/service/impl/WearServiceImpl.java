@@ -78,16 +78,17 @@ public class WearServiceImpl implements WearService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public TodayWearVO punch(Long userId, String action) {
+    public TodayWearVO punch(Long userId, String action, String mode) {
         WearSession open = findOpenSession(userId);
         if ("WEAR_ON".equals(action)) {
             if (open == null) {
                 WearSession s = newSession(userId, WearSourceEnum.MANUAL, null, WearTimes.now(), null);
-                // 归属今天正在佩戴的副（跨全部阶段匹配；无已排期 ACTIVE 副时为 null）
-                com.chiji.entity.Aligner worn = alignerService.findWornAligner(userId, WearTimes.today());
+                // 归属「当前选择阶段的当前副」：按记录模式取该模式 ACTIVE 阶段里 state=ACTIVE 的副，
+                // 不跨模式/跨阶段误配；该模式无 ACTIVE 副时为 null
+                com.chiji.entity.Aligner worn = alignerService.findActiveAligner(userId, mode);
                 s.setAlignerId(worn == null ? null : worn.getId());
                 wearSessionMapper.insert(s);
-                log.info("佩戴打卡开, userId={}, sessionId={}, alignerId={}", userId, s.getId(), s.getAlignerId());
+                log.info("佩戴打卡开, userId={}, sessionId={}, mode={}, alignerId={}", userId, s.getId(), mode, s.getAlignerId());
             }
             // 已有佩戴中会话则幂等返回（不重复开段）
         } else if ("WEAR_OFF".equals(action)) {
@@ -155,7 +156,7 @@ public class WearServiceImpl implements WearService {
         }
 
         // 归属副：补录日期当天当时佩戴的副
-        com.chiji.entity.Aligner worn = alignerService.findWornAligner(userId, date);
+        com.chiji.entity.Aligner worn = alignerService.findWornAligner(userId, date, req.mode());
         for (WearMakeupRequest.MakeupSegment seg : segs) {
             LocalDateTime start = date.atTime(parseTime(seg.start()));
             LocalDateTime end = date.atTime(parseTime(seg.end()));
@@ -212,7 +213,7 @@ public class WearServiceImpl implements WearService {
             throw new BusinessException(ErrorCode.WEAR_MAKEUP_OVERLAP);
         }
 
-        com.chiji.entity.Aligner worn = alignerService.findWornAligner(userId, date);
+        com.chiji.entity.Aligner worn = alignerService.findWornAligner(userId, date, req.mode());
         WearSession s = newSession(userId, WearSourceEnum.MANUAL, null, start, end);
         s.setAlignerId(worn == null ? null : worn.getId());
         wearSessionMapper.insert(s);
@@ -360,7 +361,8 @@ public class WearServiceImpl implements WearService {
 
     @Override
     public WearTopVO wearTop(Long userId) {
-        com.chiji.entity.Aligner active = alignerService.findActiveAligner(userId);
+        // 首页顶部概览无模式入参，保持不区分模式取任一 ACTIVE 副
+        com.chiji.entity.Aligner active = alignerService.findActiveAligner(userId, null);
         if (active == null) {
             return null;
         }

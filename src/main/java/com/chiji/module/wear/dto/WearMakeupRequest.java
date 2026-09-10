@@ -9,8 +9,10 @@ import java.util.List;
  *
  * @param date     补录目标自然日 yyyy-MM-dd（今天-7 ~ 昨天）
  * @param segments 时间段列表（同日内不重叠；start/end 均为 HH:mm）
+ * @param mode     当前记录模式（CLEAR_SINGLE / CLEAR_DUAL）：据此在该模式阶段链路内归属补录日期所戴的副；
+ *                 为空则跨全部模式 best-effort 匹配
  */
-public record WearMakeupRequest(String date, List<MakeupSegment> segments) {
+public record WearMakeupRequest(String date, List<MakeupSegment> segments, String mode) {
 
     /**
      * 单段时间（HH:mm，均可为「今天」之前的当日时刻）。

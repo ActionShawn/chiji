@@ -102,26 +102,31 @@ public interface AlignerService {
     /**
      * 查询用户「当前实际佩戴」的牙套副。
      * <p>
-     * 规则：取该用户状态为 ACTIVE 的阶段（同一时间至多一个），再取其内 state=ACTIVE 的副；
+     * 规则：取该用户状态为 ACTIVE 的阶段，再取其内 state=ACTIVE 的副；
      * 任一环节缺失返回 null（例如阶段已结束或刚建阶段尚未预排期）。
-     * 供佩戴时长模块在打卡/统计时标记会话归属（跨模块公共查询，不区分记录模式）。
+     * 供佩戴时长模块在打卡/统计时标记会话归属。
      *
      * @param userId 用户 ID
+     * @param mode   记录模式（CLEAR_SINGLE / CLEAR_DUAL）：非空时只在该模式的 ACTIVE 阶段内找，
+     *               确保归属「当前选择阶段的当前副」，不跨模式误配；
+     *               传 null 时不区分模式（供定时任务/首页兜底等无模式上下文场景）
      * @return 当前 ACTIVE 副；无则 null
      */
-    Aligner findActiveAligner(Long userId);
+    Aligner findActiveAligner(Long userId, String mode);
 
     /**
-     * 查询用户在某个自然日「当时佩戴」的牙套副（用于日常打卡归属与补录/回填历史时段）。
+     * 查询用户在某个自然日「当时佩戴」的牙套副（用于补录/回填历史时段的副归属）。
      * <p>
-     * 规则：在该用户<b>全部阶段（含已结束）</b>中取 {@code startDate <= date} 且
-     * （state=ACTIVE 或 {@code endDate >= date}）的副；跨模式阶段同期进行等多个匹配时，
-     * 取开始日期最近、副序号最大者（最近启用的副）。无匹配返回 null
-     * （例如该日期早于所有阶段第一副开始日期，或当时没有任何已排期的副）。
+     * 规则：在该用户的阶段中取 {@code startDate <= date} 且
+     * （state=ACTIVE 或 {@code endDate >= date}）的副；多个匹配时取开始日期最近、副序号最大者。
+     * 传入 {@code mode} 时只在<b>该记录模式</b>的阶段（含已结束）内查找，避免跨模式阶段同期进行时
+     * 把佩戴归到另一个模式的副；传 {@code null} 时跨全部阶段 best-effort 匹配（仅供历史回填，
+     * 因旧会话无模式上下文）。无匹配返回 null。
      *
      * @param userId 用户 ID
      * @param date   佩戴发生的那天（自然日）
+     * @param mode   记录模式（CLEAR_SINGLE / CLEAR_DUAL）；null 表示不区分模式
      * @return 当时佩戴的副；无则 null
      */
-    Aligner findWornAligner(Long userId, LocalDate date);
+    Aligner findWornAligner(Long userId, LocalDate date, String mode);
 }

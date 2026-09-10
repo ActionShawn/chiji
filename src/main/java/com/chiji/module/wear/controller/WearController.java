@@ -44,10 +44,10 @@ public class WearController {
         return R.ok(wearService.today(SecurityUtil.getCurrentUserId()));
     }
 
-    @Operation(summary = "打卡", description = "body.action = WEAR_ON(戴上)/WEAR_OFF(摘下)")
+    @Operation(summary = "打卡", description = "body.action = WEAR_ON(戴上)/WEAR_OFF(摘下)；body.mode = 当前记录模式，用于会话归属当前阶段当前副")
     @PostMapping("/punch")
     public R<TodayWearVO> punch(@Valid @RequestBody WearPunchRequest request) {
-        return R.ok(wearService.punch(SecurityUtil.getCurrentUserId(), request.action()));
+        return R.ok(wearService.punch(SecurityUtil.getCurrentUserId(), request.action(), request.mode()));
     }
 
     @Operation(summary = "撤销佩戴中会话", description = "误触戴上后回退当前佩戴中会话")

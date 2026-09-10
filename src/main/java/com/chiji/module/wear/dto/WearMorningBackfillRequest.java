@@ -8,11 +8,14 @@ package com.chiji.module.wear.dto;
  * @param startTime    昨晚戴上的时刻 HH:mm（date 当天）
  * @param stillWearing 是否现在还戴着（true 则留佩戴中会话；false 需给 endTime）
  * @param endTime      已摘下时刻 HH:mm（今天当天，需不晚于当前），stillWearing=false 时必填
+ * @param mode         当前记录模式（CLEAR_SINGLE / CLEAR_DUAL）：据此在该模式阶段链路内归属昨晚所戴的副；
+ *                     为空则跨全部模式 best-effort 匹配
  */
 public record WearMorningBackfillRequest(
         String date,
         String startTime,
         Boolean stillWearing,
-        String endTime
+        String endTime,
+        String mode
 ) {
 }

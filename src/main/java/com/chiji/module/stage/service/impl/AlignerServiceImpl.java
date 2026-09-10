@@ -379,11 +379,15 @@ public class AlignerServiceImpl implements AlignerService {
     }
 
     @Override
-    public Aligner findActiveAligner(Long userId) {
-        Stage activeStage = stageMapper.selectOne(new LambdaQueryWrapper<Stage>()
+    public Aligner findActiveAligner(Long userId, String mode) {
+        LambdaQueryWrapper<Stage> qw = new LambdaQueryWrapper<Stage>()
                 .eq(Stage::getUserId, userId)
-                .eq(Stage::getStatus, StageStatusEnum.ACTIVE.getCode())
-                .last("LIMIT 1"));
+                .eq(Stage::getStatus, StageStatusEnum.ACTIVE.getCode());
+        // 限定记录模式：跨模式可各有一个 ACTIVE 阶段，必须按当前选择模式取，避免归到另一模式的副
+        if (mode != null && !mode.isBlank()) {
+            qw.eq(Stage::getMode, mode);
+        }
+        Stage activeStage = stageMapper.selectOne(qw.last("LIMIT 1"));
         if (activeStage == null) {
             return null;
         }
@@ -394,15 +398,19 @@ public class AlignerServiceImpl implements AlignerService {
     }
 
     @Override
-    public Aligner findWornAligner(Long userId, LocalDate date) {
+    public Aligner findWornAligner(Long userId, LocalDate date, String mode) {
         if (date == null) {
             return null;
         }
-        // 跨全部阶段（含已结束）归属：补录历史日期、日常打卡与旧会话回填时，
-        // 佩戴当天所在阶段可能已结束（甚至跨模式开了新阶段），只查当前 ACTIVE 阶段会归 null
-        List<Stage> stages = stageMapper.selectList(new LambdaQueryWrapper<Stage>()
+        // 归属阶段：传 mode 时只在该记录模式的阶段（含已结束）内找，避免跨模式误配；
+        // mode 为 null（历史回填，旧会话无模式上下文）时跨全部阶段 best-effort。
+        LambdaQueryWrapper<Stage> sqw = new LambdaQueryWrapper<Stage>()
                 .eq(Stage::getUserId, userId)
-                .select(Stage::getId));
+                .select(Stage::getId);
+        if (mode != null && !mode.isBlank()) {
+            sqw.eq(Stage::getMode, mode);
+        }
+        List<Stage> stages = stageMapper.selectList(sqw);
         if (stages == null || stages.isEmpty()) {
             return null;
         }
@@ -411,7 +419,7 @@ public class AlignerServiceImpl implements AlignerService {
             stageIds.add(st.getId());
         }
         // 候选：已排期的副中 startDate <= date，且（ACTIVE 不受 endDate 约束 或 DONE 已到 endDate）；
-        // 跨模式阶段同期进行导致多个匹配时，取开始日期最近、序号最大者（最近启用的副）
+        // 同模式多个匹配时取开始日期最近、序号最大者（最近启用的副）
         return alignerMapper.selectOne(new LambdaQueryWrapper<Aligner>()
                 .in(Aligner::getStageId, stageIds)
                 .isNotNull(Aligner::getStartDate)

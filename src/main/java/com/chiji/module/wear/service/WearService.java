@@ -37,9 +37,11 @@ public interface WearService {
      *
      * @param userId 用户 ID
      * @param action WEAR_ON / WEAR_OFF
+     * @param mode   当前记录模式（CLEAR_SINGLE / CLEAR_DUAL）：WEAR_ON 时据此把会话归属到
+     *               当前选择模式的 ACTIVE 阶段当前副；为空则不区分模式
      * @return 操作后的今日工作台
      */
-    TodayWearVO punch(Long userId, String action);
+    TodayWearVO punch(Long userId, String action, String mode);
 
     /**
      * 撤销当前佩戴中会话（误触「戴上」后回退）。
