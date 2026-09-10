@@ -196,41 +196,48 @@ public class NotificationSettingServiceImpl implements NotificationSettingServic
         return row == null ? type.isDefaultOn() : Boolean.TRUE.equals(row.getEnabled());
     }
 
-    /** 应用预设模板：覆盖全部 8 类开关明细（删旧插新）。 */
+    /**
+     * 应用预设模板：覆盖全部 8 类开关明细。
+     * <p>
+     * 直接 upsert 全量 8 类即可（未变类型写成同值无副作用）；<b>不能</b>「先逻辑删除再插入」：
+     * 唯一键 (user_id, reminder_type) 不含 deleted，逻辑删除行仍物理占位，再插入必撞唯一键而失败。
+     */
     private void applyTemplate(Long userId, NotificationPresetEnum preset) {
-        Map<String, Boolean> template = templateOf(preset);
-        List<UserNotificationConfig> old = configMapper.selectList(new LambdaQueryWrapper<UserNotificationConfig>()
-                .eq(UserNotificationConfig::getUserId, userId));
-        for (UserNotificationConfig row : old) {
-            configMapper.deleteById(row.getId());
-        }
-        upsertSwitches(userId, template);
+        upsertSwitches(userId, templateOf(preset));
     }
 
-    /** 全量 upsert 8 类开关（唯一键冲突回读幂等）。 */
+    /**
+     * 全量 upsert 8 类开关。
+     * <p>
+     * 每类型处理：有未删除行 → 直接更新；无未删除行 → 先尝试插入，若撞唯一键说明存在一条
+     * 逻辑删除残留行（唯一键不含 deleted），改用 {@link UserNotificationConfigMapper#reactivateByUserType}
+     * 绕过逻辑删除过滤复活该行并写入新值，避免历史逻辑删除导致开关永远无法落库。
+     */
     private void upsertSwitches(Long userId, Map<String, Boolean> switches) {
         for (Map.Entry<String, Boolean> entry : switches.entrySet()) {
+            String type = entry.getKey();
+            boolean on = Boolean.TRUE.equals(entry.getValue());
             UserNotificationConfig row = configMapper.selectOne(new LambdaQueryWrapper<UserNotificationConfig>()
                     .eq(UserNotificationConfig::getUserId, userId)
-                    .eq(UserNotificationConfig::getReminderType, entry.getKey()));
+                    .eq(UserNotificationConfig::getReminderType, type));
             if (row != null) {
-                row.setEnabled(entry.getValue());
-                configMapper.updateById(row);
-            } else {
+                if (Boolean.TRUE.equals(row.getEnabled()) != on) {
+                    row.setEnabled(on);
+                    configMapper.updateById(row);
+                }
+                continue;
+            }
+            try {
                 UserNotificationConfig created = new UserNotificationConfig();
                 created.setUserId(userId);
-                created.setReminderType(entry.getKey());
-                created.setEnabled(entry.getValue());
-                try {
-                    configMapper.insert(created);
-                } catch (DuplicateKeyException e) {
-                    UserNotificationConfig existing = configMapper.selectOne(new LambdaQueryWrapper<UserNotificationConfig>()
-                            .eq(UserNotificationConfig::getUserId, userId)
-                            .eq(UserNotificationConfig::getReminderType, entry.getKey()));
-                    if (existing != null) {
-                        existing.setEnabled(entry.getValue());
-                        configMapper.updateById(existing);
-                    }
+                created.setReminderType(type);
+                created.setEnabled(on);
+                configMapper.insert(created);
+            } catch (DuplicateKeyException e) {
+                // 与逻辑删除残留行撞唯一键：复活该行（deleted 复位 0）并写入新值
+                int updated = configMapper.reactivateByUserType(userId, type, on ? 1 : 0);
+                if (updated <= 0) {
+                    log.warn("通知开关复活失败, userId={}, type={}", userId, type);
                 }
             }
         }
