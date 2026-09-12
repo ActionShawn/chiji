@@ -14,7 +14,7 @@ import java.util.List;
  * <p>
  * 负责阶段内牙套副的批量生成、换副与时间调整：
  * <ul>
- *   <li>{@link #batchCreateAligners}：创建阶段时按 count / daysPerAligner / startDate 批量预排期</li>
+ *   <li>{@link #batchCreateAligners}：创建阶段时按 count / daysPerAligner / startDate 批量预排期，支持指定起始副（之前 DONE / 当前 ACTIVE / 之后 FUTURE）</li>
  *   <li>{@link #finishAligner}：手动结束当前副（按上/下午半天规则确定结束日），自动开始下一副并联动重排；
  *       结束最后一副时同时把阶段置 ENDED（结束阶段）</li>
  *   <li>{@link #revertAligner}：反向换副（撤回误操作），按上一副佩戴进度分情况恢复——
@@ -27,17 +27,33 @@ public interface AlignerService {
     /**
      * 批量生成阶段下的牙套副。
      * <p>
-     * 创建阶段后调用，按 {@code count} 生成 N 副，第 1 副为 ACTIVE，其余为 FUTURE。
-     * 按 {@code stage.startDate} + {@code daysPerAligner} 批量预排期 startDate / endDate：
-     * <ul>
-     *   <li>第 1 副：startDate = stage.startDate，endDate = startDate + days - 1</li>
-     *   <li>第 N 副：startDate = 第N-1副 endDate + 1，endDate = startDate + days - 1</li>
-     * </ul>
-     * stage.startDate 为 null 时仅第 1 副 ACTIVE、currentDay=1，日期留空。
+     * 创建阶段后调用，按 {@code count} 生成 N 副（双模为 N 组、共 2N 个节点）。
+     * 节点初始状态由 {@code startNum}（当前从第几副开始）决定：
+     * {@code num < startNum} 置 DONE、{@code num == startNum} 置 ACTIVE（currentDay=1）、
+     * {@code num > startNum} 置 FUTURE；startNum=1 时即传统「第 1 副 ACTIVE」。
+     * 按 {@code stage.startDate} 排期：当前副从 startDate 起，后续顺延，已完成的前序副向前倒推，
+     * 保证连续不重叠。stage.startDate 为 null 时所有日期留空，仅当前副 currentDay=1。
      *
-     * @param stage 已创建的阶段
+     * @param stage    已创建的阶段
+     * @param startNum 当前起始副序号（1-based，须在 [1, 总节点数] 内）
      */
-    void batchCreateAligners(Stage stage);
+    void batchCreateAligners(Stage stage, int startNum);
+
+    /**
+     * 编辑阶段后对齐牙套节点（增删节点 / 重排状态 / 重新排期）。
+     * <p>
+     * 按阶段最新的 count / 天数 / startDate 与起始副 {@code startNum} 调和已有节点：
+     * <ul>
+     *   <li>副数增加：尾部补齐新的 FUTURE 节点（双模按软奇硬偶补 filmType）</li>
+     *   <li>副数减少：删除超出的尾节点；若这些节点已存在佩戴会话或时光轴印记则拒绝（防止误删有数据的副）</li>
+     *   <li>状态对齐：num &lt; startNum 置 DONE、num == startNum 置 ACTIVE（currentDay=1）、之后 FUTURE</li>
+     *   <li>排期：有 startDate 时当前副向后顺延、前序副向前倒推；无 startDate 时清空全部计划日期</li>
+     * </ul>
+     *
+     * @param stage    已更新字段的阶段实体
+     * @param startNum 当前起始副序号（1-based，须在 [1, 总节点数] 内）
+     */
+    void reconcileAligners(Stage stage, int startNum);
 
     /**
      * 手动结束当前副并开始下一副。

@@ -6,10 +6,12 @@ import com.chiji.entity.Aligner;
 import com.chiji.entity.Stage;
 import com.chiji.enums.RecordModeEnum;
 import com.chiji.enums.StageStatusEnum;
+import com.chiji.enums.AlignerStateEnum;
 import com.chiji.common.core.exception.BusinessException;
 import com.chiji.common.core.exception.ErrorCode;
 import com.chiji.module.message.service.ProgressReminderService;
 import com.chiji.module.stage.dto.CreateStageRequest;
+import com.chiji.module.stage.dto.UpdateStageRequest;
 import com.chiji.module.stage.dto.UpdateStageStatusRequest;
 import com.chiji.module.stage.mapper.AlignerMapper;
 import com.chiji.module.stage.mapper.StageMapper;
@@ -18,6 +20,7 @@ import com.chiji.module.stage.service.StageService;
 import com.chiji.module.stage.service.assembler.AlignerNodeAssembler;
 import com.chiji.module.stage.support.StageModeSupport;
 import com.chiji.module.stage.vo.AlignerNodeVO;
+import com.chiji.module.stage.vo.StageDetailVO;
 import com.chiji.module.stage.vo.StageVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -70,6 +73,13 @@ public class StageServiceImpl implements StageService {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "请填写每副佩戴天数");
         }
 
+        // 当前起始副：缺省第 1 副；双模总节点数 = 组数 × 2
+        int totalNodes = mode.isDual() ? request.count() * 2 : request.count();
+        int startNum = request.startAlignerNum() == null ? 1 : request.startAlignerNum();
+        if (startNum < 1 || startNum > totalNodes) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "起始副需在 1-" + totalNodes + " 之间");
+        }
+
         // 同一时间至多一个启用阶段（按记录模式隔离）：先把当前用户该模式下的 ACTIVE 阶段置为 ENDED
         endActiveStages(userId, mode.getCode());
 
@@ -90,11 +100,11 @@ public class StageServiceImpl implements StageService {
         stage.setSortOrder(sortOrder);
         stageMapper.insert(stage);
 
-        // 批量生成牙套副节点：单模 N 副 / 双模 N 组（软+硬 2N 个节点），第 1 个节点 ACTIVE，按 startDate 预排期
-        alignerService.batchCreateAligners(stage);
+        // 批量生成牙套副节点：单模 N 副 / 双模 N 组（软+硬 2N 个节点），第 startNum 个节点 ACTIVE（之前 DONE），按 startDate 排期
+        alignerService.batchCreateAligners(stage, startNum);
 
-        log.info("创建阶段成功, userId={}, stageId={}, mode={}, name={}, 旧启用阶段已结束, count={}",
-                userId, stage.getId(), mode.getCode(), stage.getName(), stage.getCount());
+        log.info("创建阶段成功, userId={}, stageId={}, mode={}, name={}, 旧启用阶段已结束, count={}, startNum={}",
+                userId, stage.getId(), mode.getCode(), stage.getName(), stage.getCount(), startNum);
         return toStageVO(stage);
     }
 
@@ -111,6 +121,63 @@ public class StageServiceImpl implements StageService {
                 .eq(Aligner::getStageId, stageId)
                 .orderByAsc(Aligner::getNum));
         return alignerNodeAssembler.toNodeList(aligners, stage);
+    }
+
+    @Override
+    public StageDetailVO getStageDetail(Long userId, Long stageId) {
+        Stage stage = loadOwnedStage(userId, stageId);
+        return toStageDetailVO(stage);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public StageDetailVO updateStage(Long userId, Long stageId, UpdateStageRequest request) {
+        Stage stage = loadOwnedStage(userId, stageId);
+
+        // 记录模式创建后不可改，天数按阶段当前模式校验
+        boolean dual = RecordModeEnum.CLEAR_DUAL.getCode().equals(stage.getMode());
+        if (dual) {
+            if (request.softDays() == null || request.hardDays() == null) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "双模模式需要分别填写软膜与硬膜佩戴天数");
+            }
+        } else if (request.days() == null) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "请填写每副佩戴天数");
+        }
+
+        // 起始副范围：双模总节点 = 组数 × 2
+        int totalNodes = dual ? request.count() * 2 : request.count();
+        int startNum = request.startAlignerNum() == null ? 1 : request.startAlignerNum();
+        if (startNum < 1 || startNum > totalNodes) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "起始副需在 1-" + totalNodes + " 之间");
+        }
+
+        stage.setName(request.name());
+        stage.setCount(request.count());
+        stage.setDaysPerAligner(dual ? null : request.days());
+        stage.setSoftDays(dual ? request.softDays() : null);
+        stage.setHardDays(dual ? request.hardDays() : null);
+        stage.setStartDate(parseStartDate(request.startDate()));
+        stageMapper.updateById(stage);
+
+        // 对齐节点：补/删副、状态重排、统一排期（缩量时尾部有记录会抛业务异常回滚）
+        alignerService.reconcileAligners(stage, startNum);
+
+        log.info("编辑阶段成功, userId={}, stageId={}, count={}, startNum={}, hasStartDate={}",
+                userId, stageId, request.count(), startNum, stage.getStartDate() != null);
+        return toStageDetailVO(stage);
+    }
+
+    /**
+     * 按归属加载阶段，不存在或越权抛 STAGE_NOT_FOUND。
+     */
+    private Stage loadOwnedStage(Long userId, Long stageId) {
+        Stage stage = stageMapper.selectOne(new LambdaQueryWrapper<Stage>()
+                .eq(Stage::getId, stageId)
+                .eq(Stage::getUserId, userId));
+        if (stage == null) {
+            throw new BusinessException(ErrorCode.STAGE_NOT_FOUND);
+        }
+        return stage;
     }
 
     @Override
@@ -219,6 +286,32 @@ public class StageServiceImpl implements StageService {
                 .meta(meta)
                 .status(status)
                 .edited(edited)
+                .build();
+    }
+
+    /**
+     * 派生 StageDetailVO（编辑表单回显）。startAlignerNum 取阶段内 ACTIVE 副 num，无则回退 1。
+     */
+    private StageDetailVO toStageDetailVO(Stage stage) {
+        Integer startNum = 1;
+        Aligner active = alignerMapper.selectOne(new LambdaQueryWrapper<Aligner>()
+                .eq(Aligner::getStageId, stage.getId())
+                .eq(Aligner::getState, AlignerStateEnum.ACTIVE.getCode())
+                .orderByAsc(Aligner::getNum)
+                .last("limit 1"));
+        if (active != null) {
+            startNum = active.getNum();
+        }
+        return StageDetailVO.builder()
+                .id(stage.getId())
+                .name(stage.getName())
+                .mode(stage.getMode())
+                .count(stage.getCount())
+                .days(stage.getDaysPerAligner())
+                .softDays(stage.getSoftDays())
+                .hardDays(stage.getHardDays())
+                .startDate(stage.getStartDate() == null ? null : stage.getStartDate().toString())
+                .startAlignerNum(startNum)
                 .build();
     }
 }

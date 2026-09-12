@@ -1,8 +1,10 @@
 package com.chiji.module.stage.service;
 
 import com.chiji.module.stage.dto.CreateStageRequest;
+import com.chiji.module.stage.dto.UpdateStageRequest;
 import com.chiji.module.stage.dto.UpdateStageStatusRequest;
 import com.chiji.module.stage.vo.AlignerNodeVO;
+import com.chiji.module.stage.vo.StageDetailVO;
 import com.chiji.module.stage.vo.StageVO;
 
 import java.util.List;
@@ -37,6 +39,28 @@ public interface StageService {
      * @return 牙套节点列表（按 num 升序）
      */
     List<AlignerNodeVO> getStageAligners(Long userId, Long stageId);
+
+    /**
+     * 查询阶段详情（编辑表单回显）。
+     *
+     * @param userId  当前用户 ID
+     * @param stageId 阶段 ID
+     * @return 阶段详情 VO
+     */
+    StageDetailVO getStageDetail(Long userId, Long stageId);
+
+    /**
+     * 编辑阶段。
+     * <p>
+     * 更新名称 / 总副数 / 佩戴天数 / 开始日期 / 当前起始副（记录模式不可改），
+     * 并对齐其下牙套节点：补齐新增副、状态重排、统一重新排期。
+     *
+     * @param userId  当前用户 ID
+     * @param stageId 阶段 ID
+     * @param request 编辑请求
+     * @return 更新后的阶段详情 VO
+     */
+    StageDetailVO updateStage(Long userId, Long stageId, UpdateStageRequest request);
 
     /**
      * 更新阶段状态。

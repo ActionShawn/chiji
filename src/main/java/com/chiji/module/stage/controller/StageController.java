@@ -3,9 +3,11 @@ package com.chiji.module.stage.controller;
 import com.chiji.common.core.result.R;
 import com.chiji.module.auth.util.SecurityUtil;
 import com.chiji.module.stage.dto.CreateStageRequest;
+import com.chiji.module.stage.dto.UpdateStageRequest;
 import com.chiji.module.stage.dto.UpdateStageStatusRequest;
 import com.chiji.module.stage.service.StageService;
 import com.chiji.module.stage.vo.AlignerNodeVO;
+import com.chiji.module.stage.vo.StageDetailVO;
 import com.chiji.module.stage.vo.StageVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -42,6 +44,36 @@ public class StageController {
     public R<StageVO> createStage(@Valid @RequestBody CreateStageRequest request) {
         Long userId = SecurityUtil.getCurrentUserId();
         return R.ok(stageService.createStage(userId, request), "新阶段已开启");
+    }
+
+    /**
+     * 查询阶段详情（编辑表单回显）。
+     *
+     * @param id 阶段 ID
+     * @return 阶段详情 VO
+     */
+    @Operation(summary = "查询阶段详情", description = "编辑阶段时回显名称/副数/天数/开始日期/当前副")
+    @GetMapping("/{id}")
+    public R<StageDetailVO> getStageDetail(@PathVariable Long id) {
+        Long userId = SecurityUtil.getCurrentUserId();
+        return R.ok(stageService.getStageDetail(userId, id));
+    }
+
+    /**
+     * 编辑阶段。
+     * <p>
+     * 更新名称 / 总副数 / 佩戴天数 / 开始日期 / 当前起始副（记录模式不可改），
+     * 并对齐其下牙套节点。
+     *
+     * @param id      阶段 ID
+     * @param request 编辑请求体
+     * @return 更新后的阶段详情 VO
+     */
+    @Operation(summary = "编辑阶段", description = "更新名称/副数/天数/开始日期/当前副并对齐牙套节点")
+    @PutMapping("/{id}")
+    public R<StageDetailVO> updateStage(@PathVariable Long id, @Valid @RequestBody UpdateStageRequest request) {
+        Long userId = SecurityUtil.getCurrentUserId();
+        return R.ok(stageService.updateStage(userId, id, request), "阶段已更新");
     }
 
     /**

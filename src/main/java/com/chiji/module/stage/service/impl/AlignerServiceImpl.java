@@ -6,6 +6,8 @@ import com.chiji.common.core.exception.BusinessException;
 import com.chiji.common.core.exception.ErrorCode;
 import com.chiji.entity.Aligner;
 import com.chiji.entity.Stage;
+import com.chiji.entity.TimelineRecord;
+import com.chiji.entity.WearSession;
 import com.chiji.enums.AlignerFilmEnum;
 import com.chiji.enums.AlignerStateEnum;
 import com.chiji.enums.StageStatusEnum;
@@ -14,10 +16,12 @@ import com.chiji.module.stage.dto.AlignerTimeUpdateRequest;
 import com.chiji.module.stage.dto.RevertAlignerRequest;
 import com.chiji.module.stage.mapper.AlignerMapper;
 import com.chiji.module.stage.mapper.StageMapper;
+import com.chiji.module.stage.mapper.TimelineRecordMapper;
 import com.chiji.module.stage.service.AlignerService;
 import com.chiji.module.stage.service.assembler.AlignerNodeAssembler;
 import com.chiji.module.stage.support.StageModeSupport;
 import com.chiji.module.stage.vo.AlignerNodeVO;
+import com.chiji.module.wear.mapper.WearSessionMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -28,6 +32,8 @@ import java.time.LocalTime;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * 牙套副服务实现。
@@ -65,10 +71,12 @@ public class AlignerServiceImpl implements AlignerService {
     private final StageMapper stageMapper;
     private final AlignerNodeAssembler alignerNodeAssembler;
     private final ProgressReminderService progressReminderService;
+    private final TimelineRecordMapper timelineRecordMapper;
+    private final WearSessionMapper wearSessionMapper;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void batchCreateAligners(Stage stage) {
+    public void batchCreateAligners(Stage stage, int startNum) {
         boolean dual = StageModeSupport.isDual(stage);
         // 双模按膜片类型取各自天数（创建阶段时已校验非空），单模取 daysPerAligner
         int softDays = dual && stage.getSoftDays() != null ? stage.getSoftDays() : 1;
@@ -76,8 +84,16 @@ public class AlignerServiceImpl implements AlignerService {
         LocalDate startDate = stage.getStartDate();
         boolean hasStartDate = startDate != null;
 
-        LocalDate cursor = hasStartDate ? startDate : null;
         int totalNodes = StageModeSupport.resolveTotalNodes(stage);
+        // 防御性夹取：起始副必须落在 [1, 总节点数]（服务层已校验，这里兜底）
+        if (startNum < 1) {
+            startNum = 1;
+        }
+        if (startNum > totalNodes) {
+            startNum = totalNodes;
+        }
+
+        // 先按起始副序号确定每个节点状态：之前 DONE / 当前 ACTIVE / 之后 FUTURE
         List<Aligner> aligners = new ArrayList<>(totalNodes);
         for (int num = 1; num <= totalNodes; num++) {
             // 双模：num 全局连续，软奇硬偶（先软后硬）；单模：无膜片类型
@@ -91,33 +107,165 @@ public class AlignerServiceImpl implements AlignerService {
             }
             aligner.setTotalDays(days);
 
-            if (num == 1) {
-                // 第 1 副默认 ACTIVE
+            if (num < startNum) {
+                // 已完成的前序副
+                aligner.setState(AlignerStateEnum.DONE.getCode());
+            } else if (num == startNum) {
+                // 当前起始副：ACTIVE，佩戴第 1 天
                 aligner.setState(AlignerStateEnum.ACTIVE.getCode());
                 aligner.setCurrentDay(1);
-                if (hasStartDate) {
-                    aligner.setStartDate(cursor);
-                    aligner.setEndDate(cursor.plusDays(days - 1));
-                    cursor = aligner.getEndDate().plusDays(1);
-                }
             } else {
-                // 后续 FUTURE
+                // 后续未开始
                 aligner.setState(AlignerStateEnum.FUTURE.getCode());
-                if (hasStartDate) {
-                    aligner.setStartDate(cursor);
-                    aligner.setEndDate(cursor.plusDays(days - 1));
-                    cursor = aligner.getEndDate().plusDays(1);
-                }
             }
             aligners.add(aligner);
+        }
+
+        // 按开始日期排期：当前副从 startDate 起向后顺延；已完成前序副向前倒推，保证连续不重叠
+        if (hasStartDate) {
+            LocalDate cursor = startDate;
+            for (int num = startNum; num <= totalNodes; num++) {
+                Aligner a = aligners.get(num - 1);
+                a.setStartDate(cursor);
+                a.setEndDate(cursor.plusDays(a.getTotalDays() - 1));
+                cursor = a.getEndDate().plusDays(1);
+            }
+            LocalDate nextStart = startDate;
+            for (int num = startNum - 1; num >= 1; num--) {
+                Aligner a = aligners.get(num - 1);
+                LocalDate end = nextStart.minusDays(1);
+                LocalDate st = end.minusDays(a.getTotalDays() - 1);
+                a.setStartDate(st);
+                a.setEndDate(end);
+                nextStart = st;
+            }
         }
 
         // 批量插入（MyBatis-Plus 默认逐条 insert，count 通常 ≤ 200，可接受）
         for (Aligner aligner : aligners) {
             alignerMapper.insert(aligner);
         }
-        log.info("批量生成牙套副成功, stageId={}, totalNodes={}, dual={}, hasStartDate={}",
-                stage.getId(), totalNodes, dual, hasStartDate);
+        log.info("批量生成牙套副成功, stageId={}, totalNodes={}, startNum={}, dual={}, hasStartDate={}",
+                stage.getId(), totalNodes, startNum, dual, hasStartDate);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void reconcileAligners(Stage stage, int startNum) {
+        boolean dual = StageModeSupport.isDual(stage);
+        int softDays = dual && stage.getSoftDays() != null ? stage.getSoftDays() : 1;
+        int hardDays = dual && stage.getHardDays() != null ? stage.getHardDays() : 1;
+        LocalDate startDate = stage.getStartDate();
+        boolean hasStartDate = startDate != null;
+
+        int totalNodes = StageModeSupport.resolveTotalNodes(stage);
+        if (startNum < 1) {
+            startNum = 1;
+        }
+        if (startNum > totalNodes) {
+            startNum = totalNodes;
+        }
+
+        // 已有节点按 num 索引
+        List<Aligner> existing = alignerMapper.selectList(new LambdaQueryWrapper<Aligner>()
+                .eq(Aligner::getStageId, stage.getId())
+                .orderByAsc(Aligner::getNum));
+        Map<Integer, Aligner> byNum = existing.stream()
+                .collect(Collectors.toMap(Aligner::getNum, a -> a));
+
+        // 1. 缩量：尾部多余节点先做数据保护检查（有佩戴会话 / 时光轴印记则拒绝），再逻辑删除
+        List<Long> removedIds = existing.stream()
+                .filter(a -> a.getNum() > totalNodes)
+                .map(Aligner::getId)
+                .collect(Collectors.toList());
+        if (!removedIds.isEmpty()) {
+            Long sessionCount = wearSessionMapper.selectCount(new LambdaQueryWrapper<WearSession>()
+                    .in(WearSession::getAlignerId, removedIds));
+            Long recordCount = timelineRecordMapper.selectCount(new LambdaQueryWrapper<TimelineRecord>()
+                    .in(TimelineRecord::getAlignerId, removedIds));
+            if ((sessionCount != null && sessionCount > 0) || (recordCount != null && recordCount > 0)) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "尾部牙套已有佩戴记录或印记，无法调小副数，请保留原有副数");
+            }
+            alignerMapper.deleteBatchIds(removedIds);
+        }
+
+        // 2. 逐节点对齐：更新已有 / 补齐新增，统一膜片天数与状态（之前 DONE / 当前 ACTIVE / 之后 FUTURE）
+        List<Aligner> nodes = new ArrayList<>(totalNodes);
+        for (int num = 1; num <= totalNodes; num++) {
+            boolean soft = dual && num % 2 == 1;
+            int days = dual ? (soft ? softDays : hardDays)
+                    : (stage.getDaysPerAligner() != null ? stage.getDaysPerAligner() : 1);
+            Aligner a = byNum.get(num);
+            boolean created = a == null;
+            if (created) {
+                a = new Aligner();
+                a.setStageId(stage.getId());
+                a.setNum(num);
+            }
+            if (dual) {
+                a.setFilmType(soft ? AlignerFilmEnum.SOFT.getCode() : AlignerFilmEnum.HARD.getCode());
+            }
+            a.setTotalDays(days);
+            if (num < startNum) {
+                a.setState(AlignerStateEnum.DONE.getCode());
+                a.setCurrentDay(null);
+            } else if (num == startNum) {
+                a.setState(AlignerStateEnum.ACTIVE.getCode());
+                a.setCurrentDay(1);
+            } else {
+                a.setState(AlignerStateEnum.FUTURE.getCode());
+                a.setCurrentDay(null);
+            }
+            nodes.add(a);
+            if (!created) {
+                // 先落库状态/天数，日期在第 3 步统一排期后再更新（避免重复 update）
+                alignerMapper.update(null, new LambdaUpdateWrapper<Aligner>()
+                        .eq(Aligner::getId, a.getId())
+                        .set(Aligner::getFilmType, a.getFilmType())
+                        .set(Aligner::getTotalDays, days)
+                        .set(Aligner::getState, a.getState())
+                        .set(Aligner::getCurrentDay, a.getCurrentDay()));
+            }
+        }
+
+        // 3. 排期：有 startDate 时当前副向后顺延、前序副向前倒推；无 startDate 时清空全部计划日期
+        if (hasStartDate) {
+            LocalDate cursor = startDate;
+            for (int num = startNum; num <= totalNodes; num++) {
+                Aligner a = nodes.get(num - 1);
+                a.setStartDate(cursor);
+                a.setEndDate(cursor.plusDays(a.getTotalDays() - 1));
+                cursor = a.getEndDate().plusDays(1);
+            }
+            LocalDate nextStart = startDate;
+            for (int num = startNum - 1; num >= 1; num--) {
+                Aligner a = nodes.get(num - 1);
+                LocalDate end = nextStart.minusDays(1);
+                LocalDate st = end.minusDays(a.getTotalDays() - 1);
+                a.setStartDate(st);
+                a.setEndDate(end);
+                nextStart = st;
+            }
+        } else {
+            for (Aligner a : nodes) {
+                a.setStartDate(null);
+                a.setEndDate(null);
+            }
+        }
+
+        // 4. 持久化：新增节点整体 insert；已有节点显式 set 日期（null 也要写入，不能用 updateById 的非空策略）
+        for (Aligner a : nodes) {
+            if (a.getId() == null) {
+                alignerMapper.insert(a);
+            } else {
+                alignerMapper.update(null, new LambdaUpdateWrapper<Aligner>()
+                        .eq(Aligner::getId, a.getId())
+                        .set(Aligner::getStartDate, a.getStartDate())
+                        .set(Aligner::getEndDate, a.getEndDate()));
+            }
+        }
+        log.info("编辑阶段对齐牙套节点成功, stageId={}, totalNodes={}, startNum={}, removed={}, hasStartDate={}",
+                stage.getId(), totalNodes, startNum, removedIds.size(), hasStartDate);
     }
 
     @Override
