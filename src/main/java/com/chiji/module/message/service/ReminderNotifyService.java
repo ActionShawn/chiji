@@ -28,4 +28,16 @@ public interface ReminderNotifyService {
      * @return 是否真正落库生成
      */
     boolean notify(Long userId, WearReminderTypeEnum type, LocalDate sceneDate, String title, String body);
+
+    /**
+     * 回写消息推送状态为已推送（{@code push_status='PUSHED'} + {@code pushed_at=now}）。
+     * <p>
+     * 供订阅消息下发成功（微信 {@code errcode == 0}）后调用；消息行按
+     * {@code (userId, type, sceneDate)} 定位（唯一索引保证至多一条）。
+     *
+     * @param userId    接收用户 ID
+     * @param type      提醒类型
+     * @param sceneDate 场景日期
+     */
+    void markPushed(Long userId, WearReminderTypeEnum type, LocalDate sceneDate);
 }

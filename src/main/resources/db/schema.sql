@@ -170,6 +170,8 @@ CREATE TABLE IF NOT EXISTS `user_setting` (
     `dnd_enabled`       TINYINT(1)  NOT NULL DEFAULT 0 COMMENT '勿扰时段开关：仅抑制即时弹窗，信箱消息照常归档（默认关闭，预设 22:00–08:00）',
     `dnd_start`         TIME        NOT NULL DEFAULT '22:00:00' COMMENT '勿扰开始时间',
     `dnd_end`           TIME        NOT NULL DEFAULT '08:00:00' COMMENT '勿扰结束时间',
+    `aligner_remind_time`   TIME    NOT NULL DEFAULT '07:00:00' COMMENT '换副提醒时间（Asia/Shanghai，仅整点，默认早 7 点，可改）',
+    `aligner_remind_offset` TINYINT NOT NULL DEFAULT 0 COMMENT '换副提醒时机偏移：-1 到期前一天 / 0 到期当天 / 1 到期后一天',
     `created_at`        DATETIME    NOT NULL COMMENT '创建时间',
     `updated_at`        DATETIME    NOT NULL COMMENT '更新时间',
     `deleted`           TINYINT(1)  NOT NULL DEFAULT 0 COMMENT '逻辑删除：0 正常 / 1 已删除',
@@ -255,3 +257,18 @@ CREATE TABLE IF NOT EXISTS `user_notification_config` (
     UNIQUE KEY `uk_notif_cfg_user_type` (`user_id`, `reminder_type`) COMMENT '每用户每提醒类型至多一条开关',
     KEY `idx_notif_cfg_user` (`user_id`) COMMENT '按用户取通知配置'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户通知类型开关表';
+
+-- 一次性订阅消息额度（本地记账）
+CREATE TABLE IF NOT EXISTS `user_subscribe_quota` (
+    `id`             BIGINT      NOT NULL COMMENT '主键（雪花算法生成）',
+    `user_id`        BIGINT      NOT NULL COMMENT '所属用户 ID',
+    `scene`          VARCHAR(32) NOT NULL COMMENT '订阅场景：ALIGNER_CHANGE（换副提醒）',
+    `remain`         INT         NOT NULL DEFAULT 0 COMMENT '本地记账剩余可下发次数（accept +1，发送成功 -1）',
+    `accepted_total` INT         NOT NULL DEFAULT 0 COMMENT '累计授权次数（accept 次数，仅统计用）',
+    `last_accept_at` DATETIME    DEFAULT NULL COMMENT '最近一次授权时间',
+    `created_at`     DATETIME    NOT NULL COMMENT '创建时间',
+    `updated_at`     DATETIME    NOT NULL COMMENT '更新时间',
+    `deleted`        TINYINT(1)  NOT NULL DEFAULT 0 COMMENT '逻辑删除：0 正常 / 1 已删除',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_sub_quota_user_scene` (`user_id`, `scene`) COMMENT '每用户每场景至多一条额度记录'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='一次性订阅消息额度表';

@@ -8,14 +8,17 @@ import com.chiji.entity.UserNotificationConfig;
 import com.chiji.entity.UserSetting;
 import com.chiji.enums.NotificationPresetEnum;
 import com.chiji.enums.WearReminderTypeEnum;
+import com.chiji.framework.wechat.WxSubscribeClient;
 import com.chiji.module.message.dto.NotificationUpdateRequest;
 import com.chiji.module.message.mapper.MessageMapper;
 import com.chiji.module.message.mapper.UserNotificationConfigMapper;
 import com.chiji.module.message.mapper.UserSettingMapper;
 import com.chiji.module.message.service.NotificationSettingService;
+import com.chiji.module.message.service.SubscribeQuotaService;
 import com.chiji.module.message.vo.DndSettingVO;
 import com.chiji.module.message.vo.NotificationSettingsVO;
 import com.chiji.module.message.vo.TypeSwitchVO;
+import com.chiji.module.wear.support.WearTimes;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
@@ -47,12 +50,14 @@ public class NotificationSettingServiceImpl implements NotificationSettingServic
     private static final DateTimeFormatter HH_MM = DateTimeFormatter.ofPattern("HH:mm");
     private static final LocalTime DEFAULT_DND_START = LocalTime.of(22, 0);
     private static final LocalTime DEFAULT_DND_END = LocalTime.of(8, 0);
-    /** 订阅消息能力恒未开通（前端灰置订阅通道）。 */
-    private static final boolean SUBSCRIBE_AVAILABLE = false;
+    private static final LocalTime DEFAULT_ALIGNER_REMIND_TIME = LocalTime.of(7, 0);
+    private static final int DEFAULT_ALIGNER_REMIND_OFFSET = 0;
 
     private final UserSettingMapper userSettingMapper;
     private final UserNotificationConfigMapper configMapper;
     private final MessageMapper messageMapper;
+    private final SubscribeQuotaService subscribeQuotaService;
+    private final WxSubscribeClient wxSubscribeClient;
 
     @Override
     public NotificationSettingsVO getSettings(Long userId) {
@@ -60,7 +65,7 @@ public class NotificationSettingServiceImpl implements NotificationSettingServic
                 .eq(UserSetting::getUserId, userId));
         Map<String, Boolean> enabled = effectiveSwitches(userId, loadSwitches(userId));
         String preset = s != null && s.getPresetMode() != null ? s.getPresetMode() : NotificationPresetEnum.STANDARD.getCode();
-        return toVO(s, preset, enabled);
+        return toVO(userId, s, preset, enabled);
     }
 
     @Override
@@ -91,6 +96,15 @@ public class NotificationSettingServiceImpl implements NotificationSettingServic
             if (dnd.end() != null) {
                 s.setDndEnd(parseDndTime(dnd.end()));
             }
+        }
+        if (req.alignerRemindTime() != null) {
+            s.setAlignerRemindTime(parseAlignerRemindTime(req.alignerRemindTime()));
+        }
+        if (req.alignerRemindOffset() != null) {
+            if (!isOffsetValid(req.alignerRemindOffset())) {
+                throw new BusinessException(ErrorCode.NOTIFICATION_PARAM_INVALID, "换副提醒时机不合法");
+            }
+            s.setAlignerRemindOffset(req.alignerRemindOffset());
         }
 
         // 2. 一键应用预设：覆盖 8 类开关明细
@@ -143,16 +157,30 @@ public class NotificationSettingServiceImpl implements NotificationSettingServic
         return count != null && count > 0;
     }
 
+    @Override
+    public boolean isAlignerRemindHour(Long userId) {
+        UserSetting s = userSettingMapper.selectOne(new LambdaQueryWrapper<UserSetting>()
+                .eq(UserSetting::getUserId, userId));
+        LocalTime remindTime = s != null && s.getAlignerRemindTime() != null
+                ? s.getAlignerRemindTime() : DEFAULT_ALIGNER_REMIND_TIME;
+        return WearTimes.now().getHour() == remindTime.getHour();
+    }
+
     // ───────────────────────────── 内部工具 ─────────────────────────────
 
     /** 行缺失时按默认值装配整读 VO（不写库）。 */
-    private NotificationSettingsVO toVO(UserSetting s, String preset, Map<String, Boolean> enabled) {
+    private NotificationSettingsVO toVO(Long userId, UserSetting s, String preset, Map<String, Boolean> enabled) {
         boolean master = s == null || s.getNotifMaster() == null || s.getNotifMaster();
         boolean popup = s == null || s.getNotifPopup() == null || s.getNotifPopup();
         boolean badge = s == null || s.getNotifBadge() == null || s.getNotifBadge();
         boolean dndOn = s != null && Boolean.TRUE.equals(s.getDndEnabled());
         LocalTime dndStart = s != null && s.getDndStart() != null ? s.getDndStart() : DEFAULT_DND_START;
         LocalTime dndEnd = s != null && s.getDndEnd() != null ? s.getDndEnd() : DEFAULT_DND_END;
+        LocalTime alignerTime = s != null && s.getAlignerRemindTime() != null
+                ? s.getAlignerRemindTime() : DEFAULT_ALIGNER_REMIND_TIME;
+        int alignerOffset = s != null && isOffsetValid(s.getAlignerRemindOffset())
+                ? s.getAlignerRemindOffset() : DEFAULT_ALIGNER_REMIND_OFFSET;
+        int subscribeRemain = subscribeQuotaService.remain(userId, WearReminderTypeEnum.ALIGNER_CHANGE.getCode());
 
         List<TypeSwitchVO> types = new ArrayList<>();
         for (WearReminderTypeEnum t : WearReminderTypeEnum.values()) {
@@ -162,7 +190,8 @@ public class NotificationSettingServiceImpl implements NotificationSettingServic
         return new NotificationSettingsVO(
                 master, popup, badge, preset,
                 new DndSettingVO(dndOn, dndStart.format(HH_MM), dndEnd.format(HH_MM)),
-                SUBSCRIBE_AVAILABLE, types);
+                wxSubscribeClient.isEnabled(), types,
+                alignerTime.format(HH_MM), alignerOffset, subscribeRemain);
     }
 
     /** 读取已落行的开关明细；未落行不在 map 中（由呈现层按默认值兜底）。 */
@@ -297,6 +326,28 @@ public class NotificationSettingServiceImpl implements NotificationSettingServic
         } catch (RuntimeException e) {
             throw new BusinessException(ErrorCode.NOTIFICATION_PARAM_INVALID, "勿扰时间格式应为 HH:mm");
         }
+    }
+
+    /** 解析换副提醒时间为整点；非整点或格式非法抛参数异常。 */
+    private LocalTime parseAlignerRemindTime(String hhmm) {
+        if (hhmm == null || hhmm.isBlank()) {
+            throw new BusinessException(ErrorCode.NOTIFICATION_PARAM_INVALID, "换副提醒时间格式应为 HH:00");
+        }
+        LocalTime time;
+        try {
+            time = LocalTime.parse(hhmm.trim(), HH_MM);
+        } catch (RuntimeException e) {
+            throw new BusinessException(ErrorCode.NOTIFICATION_PARAM_INVALID, "换副提醒时间格式应为 HH:00");
+        }
+        if (time.getMinute() != 0) {
+            throw new BusinessException(ErrorCode.NOTIFICATION_PARAM_INVALID, "换副提醒时间仅支持整点");
+        }
+        return time;
+    }
+
+    /** 换副提醒时机偏移合法区间：-1 前一天 / 0 当天 / 1 后一天。 */
+    private boolean isOffsetValid(Integer offset) {
+        return offset != null && offset >= -1 && offset <= 1;
     }
 
     private WearReminderTypeEnum requireType(String code) {

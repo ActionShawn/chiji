@@ -10,7 +10,7 @@ import java.time.LocalDate;
  * 所有方法内部复用 {@link ReminderNotifyService} 的开关门控与 (user,type,sceneDate) 去重，
  * 未开启对应类型/总开关或同日期已存在时返回 false。
  * <ul>
- *   <li>{@link com.chiji.enums.WearReminderTypeEnum#ALIGNER_CHANGE}：当前副超计划佩戴期后每晚催换副</li>
+ *   <li>{@link com.chiji.enums.WearReminderTypeEnum#ALIGNER_CHANGE}：当前副计划结束日（±用户配置偏移）当天提醒换副</li>
  *   <li>{@link com.chiji.enums.WearReminderTypeEnum#DAILY_RECORD}：当天无任何时光轴记录时催记录</li>
  *   <li>{@link com.chiji.enums.WearReminderTypeEnum#GREETING}：召回/连续未达标关怀/节假日/晨间问候/每周小结（一天至多一条）</li>
  *   <li>{@link com.chiji.enums.WearReminderTypeEnum#MILESTONE}：每完成一副+进度分档、连续达标成就、阶段满一周、阶段结束</li>
@@ -19,12 +19,15 @@ import java.time.LocalDate;
 public interface ProgressReminderService {
 
     /**
-     * 换副超期提醒：当前副已超过计划结束日（且非最后不需要换的情形一律按「该换副」处理）。
+     * 换副提醒：在当前副「计划结束日 + 用户配置时机偏移」当天，提醒更换下一副。
+     * <p>
+     * 时机偏移取自 {@code user_setting.aligner_remind_offset}（-1 前一天 / 0 当天 / 1 后一天，默认当天）；
+     * 站内消息按 {@code sceneDate = notifyDate} 去重落库，落库成功后若用户有一次性订阅额度则同时下发微信订阅消息。
      *
      * @param userId 用户 ID
      * @return 是否实际归档了一条消息
      */
-    boolean alignerOverdueRemind(Long userId);
+    boolean alignerChangeRemind(Long userId);
 
     /**
      * 每日记录提醒：仅当当天没有任何时光轴记录且存在启用阶段时补发。

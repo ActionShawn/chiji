@@ -53,4 +53,15 @@ public interface NotificationSettingService {
      * @return 是否已存在
      */
     boolean existsSceneMessage(Long userId, WearReminderTypeEnum type, LocalDate sceneDate);
+
+    /**
+     * 当前是否命中该用户的换副提醒整点。
+     * <p>
+     * 换副提醒时间存于 {@code user_setting.aligner_remind_time}（仅整点，缺省 07:00）；
+     * 定时任务按小时整点扫描，先按本方法筛掉非命中小时，再做换副判定。
+     *
+     * @param userId 用户 ID
+     * @return 当前小时等于用户配置的提醒小时返回 true
+     */
+    boolean isAlignerRemindHour(Long userId);
 }

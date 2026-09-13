@@ -4,15 +4,21 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.chiji.entity.Aligner;
 import com.chiji.entity.Stage;
 import com.chiji.entity.TimelineRecord;
+import com.chiji.entity.User;
+import com.chiji.entity.UserSetting;
 import com.chiji.entity.WearDailySummary;
 import com.chiji.entity.WearSession;
 import com.chiji.enums.AlignerStateEnum;
 import com.chiji.enums.StageStatusEnum;
 import com.chiji.enums.WearLevelEnum;
 import com.chiji.enums.WearReminderTypeEnum;
+import com.chiji.framework.wechat.WxSubscribeClient;
+import com.chiji.module.auth.mapper.UserMapper;
+import com.chiji.module.message.mapper.UserSettingMapper;
 import com.chiji.module.message.service.NotificationSettingService;
 import com.chiji.module.message.service.ProgressReminderService;
 import com.chiji.module.message.service.ReminderNotifyService;
+import com.chiji.module.message.service.SubscribeQuotaService;
 import com.chiji.module.message.support.ChinaHolidayCalendar;
 import com.chiji.module.stage.mapper.AlignerMapper;
 import com.chiji.module.stage.mapper.StageMapper;
@@ -28,7 +34,11 @@ import org.springframework.stereotype.Service;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 矫正进度/问候类提醒产出实现。见 {@link ProgressReminderService}。
@@ -49,18 +59,40 @@ public class ProgressReminderServiceImpl implements ProgressReminderService {
     private static final int IDLE_RECALL_DAYS = 3;
     private static final int UNDER_GOAL_DAYS = 3;
 
+    /** 换副提醒文案（下标 = 时机偏移 + 1：-1 前一天 / 0 当天 / 1 后一天），元素为 [标题, 正文]。 */
+    private static final String[][] ALIGNER_CHANGE_COPY = {
+            {"明天要换新牙套啦 🌙", "明晚就轮到下一副啦，今晚先记一下～ 小齿一直陪着你，一步一个脚印 🌿"},
+            {"今晚要换新牙套啦 🌙", "今晚记得换上下一副哦～ 这一段你戴得很稳，小齿会一直陪着你，一起向更整齐的笑容出发 🌿"},
+            {"新牙套在等你哦 🌙", "昨晚是不是忘了换上呀？今晚换上下一副，矫正不停步，小齿一直陪着你 🌿"},
+    };
+
+    /** 微信订阅消息 `thing1`（事项主题，下标 = 时机偏移 + 1，≤20 字符）。 */
+    private static final String[] ALIGNER_WX_THING1 = {
+            "明天要换新牙套啦", "今晚要换新牙套啦", "新牙套在等你哦"};
+    /** 微信订阅消息 `thing12`（备注消息，下标 = 时机偏移 + 1，≤20 字符）。 */
+    private static final String[] ALIGNER_WX_THING12 = {
+            "明晚换上下一副，小齿陪着你", "记得换上下一副，小齿陪着你", "昨晚忘换啦？今晚补上，小齿陪你"};
+    /** 微信订阅消息 `time10`（截止时间）格式。 */
+    private static final DateTimeFormatter WX_DEADLINE_FORMAT = DateTimeFormatter.ofPattern("yyyy年M月d日 HH:mm");
+    /** 换副到期日截止时刻（`time10` 统一取到期日 23:59）。 */
+    private static final LocalTime ALIGNER_DEADLINE = LocalTime.of(23, 59);
+
     private final NotificationSettingService notificationSettingService;
     private final ReminderNotifyService reminderNotifyService;
+    private final SubscribeQuotaService subscribeQuotaService;
+    private final WxSubscribeClient wxSubscribeClient;
     private final StageMapper stageMapper;
     private final AlignerMapper alignerMapper;
     private final TimelineRecordMapper timelineRecordMapper;
     private final WearDailySummaryMapper wearDailySummaryMapper;
     private final WearSessionMapper wearSessionMapper;
+    private final UserSettingMapper userSettingMapper;
+    private final UserMapper userMapper;
 
     // ───────────────────────── 换副 / 每日记录 ─────────────────────────
 
     @Override
-    public boolean alignerOverdueRemind(Long userId) {
+    public boolean alignerChangeRemind(Long userId) {
         if (!allowed(userId, WearReminderTypeEnum.ALIGNER_CHANGE)) {
             return false;
         }
@@ -73,26 +105,19 @@ public class ProgressReminderServiceImpl implements ProgressReminderService {
         if (plannedEnd == null) {
             return false;
         }
-        LocalDate today = WearTimes.today();
-        if (!today.isAfter(plannedEnd)) {
+        // 提醒日 = 计划结束日 + 用户配置偏移（-1 前一天 / 0 当天 / 1 后一天）
+        int offset = alignerRemindOffset(userId);
+        LocalDate notifyDate = plannedEnd.plusDays(offset);
+        if (!WearTimes.today().equals(notifyDate)) {
             return false;
         }
-        boolean last = active.getNum() != null && active.getNum().intValue() >= ctx.totalNodes();
-        String title;
-        String body;
-        if (last) {
-            title = "最后一程也到时间啦 🎉";
-            body = "「" + stageLabel(ctx.stage()) + "」快戴满啦，" + alignerLabel(ctx.stage(), active.getNum())
-                    + "结束后就可以收个漂亮的尾，收获满满的成就感～";
-        } else {
-            title = "该换下一副牙套啦 🦷";
-            String[] variants = {
-                    alignerLabel(ctx.stage(), active.getNum()) + "已经超计划时间了，今晚换上新的，让矫正一刻不停～",
-                    alignerLabel(ctx.stage(), active.getNum()) + "佩戴超时啦，趁睡前换上下一段，距离整齐的笑容又近一步～",
-            };
-            body = variants[pick(userId, today, variants.length)];
+        String[] copy = ALIGNER_CHANGE_COPY[offset + 1];
+        boolean stored = reminderNotifyService.notify(
+                userId, WearReminderTypeEnum.ALIGNER_CHANGE, notifyDate, copy[0], copy[1]);
+        if (stored) {
+            pushAlignerChange(userId, notifyDate, offset);
         }
-        return reminderNotifyService.notify(userId, WearReminderTypeEnum.ALIGNER_CHANGE, today, title, body);
+        return stored;
     }
 
     @Override
@@ -374,6 +399,44 @@ public class ProgressReminderServiceImpl implements ProgressReminderService {
 
     private boolean allowed(Long userId, WearReminderTypeEnum type) {
         return notificationSettingService.isReminderAllowed(userId, type);
+    }
+
+    /** 用户配置的换副提醒时机偏移（-1/0/1）；缺失或非法回退 0（到期当天）。 */
+    private int alignerRemindOffset(Long userId) {
+        UserSetting s = userSettingMapper.selectOne(new LambdaQueryWrapper<UserSetting>()
+                .eq(UserSetting::getUserId, userId));
+        Integer offset = s == null ? null : s.getAlignerRemindOffset();
+        return offset != null && offset >= -1 && offset <= 1 ? offset : 0;
+    }
+
+    /**
+     * 站内落库成功后下发微信一次性订阅消息。
+     * <p>
+     * 无额度 / 未配置 / 无 openid / 下发失败一律静默跳过，仅保留站内消息；
+     * 仅当微信返回 {@code errcode == 0} 时才扣减额度并回写消息推送状态。
+     */
+    private void pushAlignerChange(Long userId, LocalDate notifyDate, int offset) {
+        if (!wxSubscribeClient.isEnabled()) {
+            return;
+        }
+        String scene = WearReminderTypeEnum.ALIGNER_CHANGE.getCode();
+        if (subscribeQuotaService.remain(userId, scene) <= 0) {
+            return;
+        }
+        User user = userMapper.selectById(userId);
+        String openid = user == null ? null : user.getOpenid();
+        if (openid == null || openid.isBlank()) {
+            return;
+        }
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("thing1", Map.of("value", ALIGNER_WX_THING1[offset + 1]));
+        data.put("time10", Map.of("value", notifyDate.atTime(ALIGNER_DEADLINE).format(WX_DEADLINE_FORMAT)));
+        data.put("thing12", Map.of("value", ALIGNER_WX_THING12[offset + 1]));
+        if (!wxSubscribeClient.sendAlignerChangeMessage(openid, data)) {
+            return;
+        }
+        subscribeQuotaService.consumeIfAvailable(userId, scene);
+        reminderNotifyService.markPushed(userId, WearReminderTypeEnum.ALIGNER_CHANGE, notifyDate);
     }
 
     /** 某日是否有佩戴会话重叠（含当日 00:00 前开始的延续会话）。 */

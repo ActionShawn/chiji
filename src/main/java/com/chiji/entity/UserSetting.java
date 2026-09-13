@@ -47,6 +47,12 @@ public class UserSetting {
     /** 每日提醒时间（可选，未设置为 null） */
     private LocalTime reminderTime;
 
+    /** 换副提醒时间（Asia/Shanghai，仅整点，缺省 07:00，可改；与每日提醒时间语义不同） */
+    private LocalTime alignerRemindTime;
+
+    /** 换副提醒时机偏移：-1 到期前一天 / 0 到期当天 / 1 到期后一天（缺省 0） */
+    private Integer alignerRemindOffset;
+
     /** 每日佩戴目标（秒，默认 20h=72000；可调 18.0–22.0h，步进 0.5h） */
     private Integer goalSec;
 

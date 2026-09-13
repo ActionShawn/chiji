@@ -104,6 +104,12 @@ chiji:
   wechat:
     appid: ${WECHAT_APPID:}
     secret: ${WECHAT_SECRET:}
+    # 一次性订阅消息（换副提醒）：模板 ID 非机密，允许写默认值；enabled=false 时仅站内消息
+    subscribe:
+      enabled: ${WECHAT_SUBSCRIBE_ENABLED:true}
+      aligner-change-template-id: ${WECHAT_TMPL_ALIGNER_CHANGE:8OJWmrJwUswD20NH4QlI69nrx7IEb6TOstBzMr6XYzU}
+      page: ${WECHAT_SUBSCRIBE_PAGE:pages/index/index}
+      miniprogram-state: ${WECHAT_MINIPROGRAM_STATE:formal}
   # 阿里云 OSS
   oss:
     endpoint: ${OSS_ENDPOINT:}

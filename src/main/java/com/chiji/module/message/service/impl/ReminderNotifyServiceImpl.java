@@ -1,10 +1,12 @@
 package com.chiji.module.message.service.impl;
 
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.chiji.entity.Message;
 import com.chiji.enums.WearReminderTypeEnum;
 import com.chiji.module.message.mapper.MessageMapper;
 import com.chiji.module.message.service.NotificationSettingService;
 import com.chiji.module.message.service.ReminderNotifyService;
+import com.chiji.module.wear.support.WearTimes;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
@@ -20,6 +22,9 @@ import java.time.LocalDate;
 @Service
 @RequiredArgsConstructor
 public class ReminderNotifyServiceImpl implements ReminderNotifyService {
+
+    /** 推送状态：已推送（订阅消息下发成功）。 */
+    private static final String PUSH_STATUS_PUSHED = "PUSHED";
 
     private final MessageMapper messageMapper;
     private final NotificationSettingService notificationSettingService;
@@ -59,5 +64,21 @@ public class ReminderNotifyServiceImpl implements ReminderNotifyService {
         }
         log.info("提醒消息已归档, userId={}, type={}, sceneDate={}, msgId={}", userId, type.getCode(), sceneDate, m.getId());
         return true;
+    }
+
+    @Override
+    public void markPushed(Long userId, WearReminderTypeEnum type, LocalDate sceneDate) {
+        if (userId == null || type == null || sceneDate == null) {
+            return;
+        }
+        int updated = messageMapper.update(null, new LambdaUpdateWrapper<Message>()
+                .eq(Message::getUserId, userId)
+                .eq(Message::getReminderType, type.getCode())
+                .eq(Message::getSceneDate, sceneDate)
+                .set(Message::getPushStatus, PUSH_STATUS_PUSHED)
+                .set(Message::getPushedAt, WearTimes.now()));
+        if (updated <= 0) {
+            log.warn("回写消息推送状态未命中, userId={}, type={}, sceneDate={}", userId, type.getCode(), sceneDate);
+        }
     }
 }
