@@ -5,8 +5,8 @@ import java.util.List;
 /**
  * 换副历史页 / 阶段下某副牙套的佩戴汇总（/api/wear/aligner/{id}/summary）。
  * <p>
- * 会话时间跨多自然日时，按「会话重叠区间」切分归属到每日自然日，
- * 与该副关联（会话 aligner_id 来自打卡时刻所在 ACTIVE 副）。
+ * 按会话的 {@code aligner_id} 归属统计：仅累计归属该副的会话，跨午夜不预拆，按
+ * {@code [当日00:00, 次日00:00)} 逐日切分后累加。
  *
  * @param alignerId   牙套副 id
  * @param totalSec    佩戴本副累计总时长（秒）

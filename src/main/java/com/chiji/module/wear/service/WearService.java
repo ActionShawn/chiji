@@ -103,7 +103,8 @@ public interface WearService {
     /**
      * 某副牙套的佩戴汇总（换副历史 / 阶段详情）。
      * <p>
-     * 仅统计 aligner_id 归属该副的会话，跨日会话按自然日切分；无贡献返回空列表。
+     * 按会话的 {@code aligner_id} 归属统计：仅累计归属该副的会话，跨日会话按
+     * {@code [当日00:00, 次日00:00)} 逐日切分；佩戴中会话计入截至当前；无贡献返回空列表。
      *
      * @param userId    用户 ID
      * @param alignerId 牙套副 ID

@@ -1,4 +1,4 @@
-package com.chiji.module.wear.migration;
+package com.chiji.module.wear.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
@@ -26,6 +26,9 @@ import java.util.List;
  * <p>
  * 更新语句带 {@code aligner_id IS NULL} 条件，重复执行不会覆盖新数据；
  * 无孤儿会话时直接返回，不产生任何查询之外的开销。
+ * <p>
+ * 位于 service 层：直接使用 {@code WearSessionMapper} 属分层守护测试（ArchUnit
+ * {@code module_mapper_only_accessed_by_service_layer}）允许的范围，mapper 仅可由 service 层访问。
  */
 @Slf4j
 @Component

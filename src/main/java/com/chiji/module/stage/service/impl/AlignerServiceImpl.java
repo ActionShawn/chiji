@@ -11,6 +11,7 @@ import com.chiji.entity.WearSession;
 import com.chiji.enums.AlignerFilmEnum;
 import com.chiji.enums.AlignerStateEnum;
 import com.chiji.enums.StageStatusEnum;
+import com.chiji.enums.WearSourceEnum;
 import com.chiji.module.message.service.ProgressReminderService;
 import com.chiji.module.stage.dto.AlignerTimeUpdateRequest;
 import com.chiji.module.stage.dto.RevertAlignerRequest;
@@ -22,12 +23,14 @@ import com.chiji.module.stage.service.assembler.AlignerNodeAssembler;
 import com.chiji.module.stage.support.StageModeSupport;
 import com.chiji.module.stage.vo.AlignerNodeVO;
 import com.chiji.module.wear.mapper.WearSessionMapper;
+import com.chiji.module.wear.support.WearTimes;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -333,6 +336,12 @@ public class AlignerServiceImpl implements AlignerService {
 
             // 4. 联动重排后续 FUTURE 副（num > next.num）：按各副自身 totalDays 依次顺延
             int repackCount = repackAfter(current.getStageId(), next.getNum(), nextEndDate);
+
+            // 换副时若仍处于佩戴中：在换副时刻把旧会话收口，并为新副另起一条佩戴开始记录。
+            // 会话的 alignerId 在戴上时刻写入且为单值、跨午夜不预拆；若不拆分，
+            // 「前一晚戴上、换副后仍戴着」的整段会全挂在旧副，新副按 ID 统计时漏掉换副后的时长
+            splitOpenSessionToNext(userId, current, next);
+
             log.info("换副成功, userId={}, stageId={}, finishedAlignerNum={}, nextAlignerNum={}, repackCount={}",
                     userId, current.getStageId(), current.getNum(), next.getNum(), repackCount);
         }
@@ -577,6 +586,40 @@ public class AlignerServiceImpl implements AlignerService {
                 .orderByDesc(Aligner::getStartDate)
                 .orderByDesc(Aligner::getNum)
                 .last("LIMIT 1"));
+    }
+
+    /**
+     * 换副时拆分仍在佩戴中的会话：把归属旧副、尚未摘下的会话在换副时刻收口，
+     * 并为新副另起一条佩戴开始记录。
+     * <p>
+     * {@code wear_session.alignerId} 在戴上时刻写入且为单值、跨午夜不预拆；若不拆分，
+     * 「前一晚戴上、换副后继续佩戴」的整段会全部归属旧副，新副按 ID 统计时漏掉换副时刻
+     * 之后的时长。仅在佩戴中会话确实归属本次结束的旧副时处理，避免误拆别的副的会话。
+     *
+     * @param userId  用户 ID
+     * @param current 本次结束的旧副（已置 DONE）
+     * @param next    本次启用的新副（已置 ACTIVE）
+     */
+    private void splitOpenSessionToNext(Long userId, Aligner current, Aligner next) {
+        WearSession open = wearSessionMapper.selectOne(new LambdaQueryWrapper<WearSession>()
+                .eq(WearSession::getUserId, userId)
+                .isNull(WearSession::getEndedAt)
+                .last("LIMIT 1"));
+        if (open == null || !current.getId().equals(open.getAlignerId())) {
+            return;
+        }
+        LocalDateTime switchAt = WearTimes.now();
+        open.setEndedAt(switchAt);
+        wearSessionMapper.updateById(open);
+
+        WearSession fresh = new WearSession();
+        fresh.setUserId(userId);
+        fresh.setAlignerId(next.getId());
+        fresh.setSource(WearSourceEnum.MANUAL.getCode());
+        fresh.setStartedAt(switchAt);
+        wearSessionMapper.insert(fresh);
+        log.info("换副拆分佩戴会话, userId={}, sessionId={}, fromAlignerId={}, toAlignerId={}, switchAt={}",
+                userId, open.getId(), current.getId(), next.getId(), switchAt);
     }
 
     /**

@@ -320,6 +320,7 @@ public class WearServiceImpl implements WearService {
 
     @Override
     public WearAlignerSummaryVO alignerSummary(Long userId, Long alignerId) {
+        // 按会话归属统计：仅累计 aligner_id 归属该副的会话，跨日会话按自然日切分
         List<WearSession> sessions = wearSessionMapper.selectList(new LambdaQueryWrapper<WearSession>()
                 .eq(WearSession::getUserId, userId)
                 .eq(WearSession::getAlignerId, alignerId)
