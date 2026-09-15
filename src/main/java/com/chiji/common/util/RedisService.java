@@ -87,4 +87,26 @@ public class RedisService {
     public Boolean expire(String key, Duration timeout) {
         return redisTemplate.expire(key, timeout);
     }
+
+    /**
+     * 自增计数并设置过期时间（限频用）。
+     * <p>
+     * 首次自增（返回 1）时设置过期时间；Redis 异常时返回 0，
+     * 调用方按「未超限」处理（限频是保护措施，故障时放行埋点）。
+     *
+     * @param key     键
+     * @param timeout 首次自增后的过期时长
+     * @return 自增后的值（异常时 0）
+     */
+    public long increment(String key, Duration timeout) {
+        try {
+            Long value = redisTemplate.opsForValue().increment(key);
+            if (value != null && value == 1L) {
+                redisTemplate.expire(key, timeout);
+            }
+            return value == null ? 0L : value;
+        } catch (Exception e) {
+            return 0L;
+        }
+    }
 }
