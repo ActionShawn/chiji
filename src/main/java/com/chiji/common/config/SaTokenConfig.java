@@ -5,6 +5,10 @@ import cn.dev33.satoken.interceptor.SaInterceptor;
 import cn.dev33.satoken.router.SaHttpMethod;
 import cn.dev33.satoken.router.SaRouter;
 import cn.dev33.satoken.stp.StpUtil;
+import com.chiji.common.core.exception.BusinessException;
+import com.chiji.common.core.exception.ErrorCode;
+import com.chiji.module.auth.service.UserService;
+import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
@@ -14,9 +18,13 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
  * <p>
  * 拦截所有请求，仅对 {@code /api/**} 下的接口执行登录校验；
  * 白名单放行登录、基础自检与 AI 自检接口，并放行 CORS 预检请求（OPTIONS）。
+ * {@code /api/admin/**} 在登录校验之上叠加管理员角色校验（user.role = ADMIN）。
  */
 @Configuration
+@RequiredArgsConstructor
 public class SaTokenConfig implements WebMvcConfigurer {
+
+    private final UserService userService;
 
     /**
      * 注册 Sa-Token 拦截器。
@@ -29,7 +37,14 @@ public class SaTokenConfig implements WebMvcConfigurer {
                         .match("/api/**")
                         .notMatch(SaHttpMethod.OPTIONS)
                         .notMatch("/api/auth/login", "/api/ping", "/api/ai/ping")
-                        .check(r -> StpUtil.checkLogin())))
+                        .check(r -> StpUtil.checkLogin())
+                        // 管理端路由：登录之上叠加角色校验，非管理员返回 403
+                        .match("/api/admin/**")
+                        .check(r -> {
+                            if (!userService.isAdmin(StpUtil.getLoginIdAsLong())) {
+                                throw new BusinessException(ErrorCode.FORBIDDEN);
+                            }
+                        })))
                 .addPathPatterns("/**");
     }
 }

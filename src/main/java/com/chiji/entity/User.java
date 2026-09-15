@@ -44,6 +44,9 @@ public class User {
     /** 治疗方式：TreatmentTypeEnum.name()，CLEAR_ALIGNER(隐形)/FIXED_BRACKET(固定托槽)/LINGUAL(舌侧)，未选择为 null */
     private String treatmentType;
 
+    /** 角色：UserRoleEnum.name()，USER(普通用户)/ADMIN(管理员)，管理员经 SQL 手动提权 */
+    private String role;
+
     /** 创建时间，插入时自动填充 */
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;

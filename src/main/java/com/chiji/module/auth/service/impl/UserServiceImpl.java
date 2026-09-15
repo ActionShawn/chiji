@@ -8,6 +8,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.chiji.module.auth.mapper.UserMapper;
 import com.chiji.module.auth.service.UserService;
 import com.chiji.module.auth.vo.UserProfileVO;
+import com.chiji.enums.UserRoleEnum;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -66,6 +67,12 @@ public class UserServiceImpl implements UserService {
                 .toList();
     }
 
+    @Override
+    public boolean isAdmin(Long userId) {
+        User user = userMapper.selectById(userId);
+        return user != null && UserRoleEnum.ADMIN.getCode().equals(user.getRole());
+    }
+
     private User requireUser(Long userId) {
         User user = userMapper.selectById(userId);
         if (user == null) {
@@ -81,6 +88,7 @@ public class UserServiceImpl implements UserService {
                 user.getAvatarUrl(),
                 user.getPhone(),
                 user.getTreatmentType(),
+                user.getRole() == null ? UserRoleEnum.USER.getCode() : user.getRole(),
                 user.getCreatedAt());
     }
 }

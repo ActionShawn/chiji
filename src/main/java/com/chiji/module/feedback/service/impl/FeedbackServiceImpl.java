@@ -153,6 +153,8 @@ public class FeedbackServiceImpl implements FeedbackService {
                 feedback.getContact(),
                 feedback.getStatus(),
                 status == null ? feedback.getStatus() : status.getDesc(),
+                feedback.getReply(),
+                feedback.getRepliedAt(),
                 images,
                 feedback.getCreatedAt());
     }

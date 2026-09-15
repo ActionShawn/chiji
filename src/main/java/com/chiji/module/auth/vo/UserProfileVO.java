@@ -18,6 +18,8 @@ public record UserProfileVO(
         String phone,
         /** 治疗方式：TreatmentTypeEnum.name()（未选择为 null） */
         String treatmentType,
+        /** 角色：UserRoleEnum.name()，USER(普通用户)/ADMIN(管理员)，前端据此显隐管理入口 */
+        String role,
         /** 注册时间 */
         LocalDateTime createdAt) {
 }

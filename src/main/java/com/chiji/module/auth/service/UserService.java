@@ -36,4 +36,14 @@ public interface UserService {
      * @return 全部用户 ID
      */
     List<Long> listAllUserIds();
+
+    /**
+     * 判断用户是否为管理员（user.role = ADMIN）。
+     * <p>
+     * 供 /api/admin/** 路由拦截做权限校验；用户不存在视为非管理员。
+     *
+     * @param userId 用户 ID
+     * @return true=管理员
+     */
+    boolean isAdmin(Long userId);
 }

@@ -1,27 +1,30 @@
-package com.chiji.module.feedback.vo;
+package com.chiji.module.admin.vo;
 
 import java.time.LocalDateTime;
 import java.util.List;
 
 /**
- * 反馈 VO。
+ * 管理端反馈 VO。
  * <p>
- * 供「我的反馈」历史列表展示：正文、图片、联系方式（脱敏按需）、处理状态与提交时间。
+ * 供管理后台反馈列表/详情展示：用户信息（昵称 + 脱敏 openid）、正文、图片、
+ * 处理状态与回复。合规要求：不包含存量联系方式字段。
  */
-public record FeedbackVO(
+public record AdminFeedbackVO(
         /** 反馈 ID */
         Long id,
+        /** 提交用户 ID */
+        Long userId,
+        /** 提交用户昵称（未设置为 null，前端回退「微信用户」） */
+        String nickname,
+        /** 提交用户 openid（脱敏：前4后4，如 wx_o***xyz） */
+        String openidMasked,
         /** 意见正文 */
         String content,
-        /** 联系方式类型：PHONE / EMAIL（未留联系方式为 null） */
-        String contactType,
-        /** 联系方式值（手机号或邮箱，可空） */
-        String contact,
         /** 处理状态：FeedbackStatusEnum.name() */
         String status,
         /** 处理状态中文标签（PENDING=待处理 / PROCESSED=已处理） */
         String statusLabel,
-        /** 管理员回复（未回复为 null），用户在反馈历史页查看 */
+        /** 管理员回复（未回复为 null） */
         String reply,
         /** 回复时间（未回复为 null） */
         LocalDateTime repliedAt,
