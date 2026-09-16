@@ -2,11 +2,16 @@ package com.chiji.module.wear.service;
 
 import com.chiji.module.wear.dto.WearMakeupRequest;
 import com.chiji.module.wear.dto.WearMorningBackfillRequest;
+import com.chiji.module.wear.dto.WearSessionEditRequest;
 import com.chiji.module.wear.vo.GoalVO;
+import com.chiji.module.wear.vo.TodaySessionVO;
 import com.chiji.module.wear.vo.TodayWearVO;
 import com.chiji.module.wear.vo.WearAlignerSummaryVO;
 import com.chiji.module.wear.vo.WearStatsVO;
 import com.chiji.module.wear.vo.WearTopVO;
+
+import java.time.LocalDate;
+import java.util.List;
 
 /**
  * 佩戴时长模块核心服务（隐形矫正工作台的「佩戴」页与首页联动）。
@@ -119,4 +124,39 @@ public interface WearService {
      * @return 顶部概览；无当前佩戴副时 null
      */
     WearTopVO wearTop(Long userId);
+
+    /**
+     * 查询某自然日的所有佩戴会话（含跨夜会话在该日的裁剪段），按开始时间升序。
+     * <p>
+     * 即为「时长校准」Sheet 该日列表的数据源；空态返回空列表。
+     *
+     * @param userId 用户 ID
+     * @param date   目标自然日 yyyy-MM-dd
+     * @return 当日会话列表（升序）
+     */
+    List<TodaySessionVO> sessions(Long userId, LocalDate date);
+
+    /**
+     * 编辑某会话的开始/结束时间（时间方向不限，均保持同日与「非未来/非重叠/单日≤24h」约束）。
+     * <p>
+     * 结束的 MANUAL 会话 start/end 均改；佩戴中 MANUAL 仅允许改 start、end 保持 null。
+     * MANUAL 编辑后置 {@code edited=1}（打「修正」标），并按字段写入编辑留痕；随后重算当日结算。
+     *
+     * @param userId    用户 ID
+     * @param sessionId 会话 ID
+     * @param req       新开始/结束时间
+     * @return 操作后的今日工作台
+     */
+    TodayWearVO updateSession(Long userId, Long sessionId, WearSessionEditRequest req);
+
+    /**
+     * 删除某佩戴会话（仅 {@code source=MAKEUP} 可删，二次确认由前端负责）。
+     * <p>
+     * 删除前写 DELETE 留痕，随后重算当日结算。
+     *
+     * @param userId    用户 ID
+     * @param sessionId 会话 ID
+     * @return 操作后的今日工作台
+     */
+    TodayWearVO deleteSession(Long userId, Long sessionId);
 }

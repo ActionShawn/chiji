@@ -1,13 +1,17 @@
 package com.chiji.module.wear.controller;
 
+import com.chiji.common.core.exception.BusinessException;
+import com.chiji.common.core.exception.ErrorCode;
 import com.chiji.common.core.result.R;
 import com.chiji.module.auth.util.SecurityUtil;
 import com.chiji.module.wear.dto.WearMakeupRequest;
 import com.chiji.module.wear.dto.WearMorningBackfillRequest;
 import com.chiji.module.wear.dto.WearPunchRequest;
 import com.chiji.module.wear.dto.GoalUpdateRequest;
+import com.chiji.module.wear.dto.WearSessionEditRequest;
 import com.chiji.module.wear.service.WearService;
 import com.chiji.module.wear.vo.GoalVO;
+import com.chiji.module.wear.vo.TodaySessionVO;
 import com.chiji.module.wear.vo.TodayWearVO;
 import com.chiji.module.wear.vo.WearAlignerSummaryVO;
 import com.chiji.module.wear.vo.WearStatsVO;
@@ -15,6 +19,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -23,6 +28,10 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
+import java.util.List;
 
 /**
  * 佩戴时长接口。
@@ -68,6 +77,24 @@ public class WearController {
         return R.ok(wearService.morningBackfill(SecurityUtil.getCurrentUserId(), request));
     }
 
+    @Operation(summary = "当日佩戴会话列表", description = "时长校准：查询某自然日所有会话（含跨夜裁剪段），按开始时间升序")
+    @GetMapping("/sessions")
+    public R<List<TodaySessionVO>> sessions(@RequestParam String date) {
+        return R.ok(wearService.sessions(SecurityUtil.getCurrentUserId(), parseDate(date)));
+    }
+
+    @Operation(summary = "编辑佩戴会话时间", description = "只改开始/结束时间，方向不限；MANUAL 编辑后打「修正」标；佩戴中仅可改开始")
+    @PutMapping("/sessions/{id}")
+    public R<TodayWearVO> updateSession(@PathVariable Long id, @Valid @RequestBody WearSessionEditRequest request) {
+        return R.ok(wearService.updateSession(SecurityUtil.getCurrentUserId(), id, request));
+    }
+
+    @Operation(summary = "删除补录段", description = "仅 source=MAKEUP 的会话可删，二次确认由前端负责")
+    @DeleteMapping("/sessions/{id}")
+    public R<TodayWearVO> deleteSession(@PathVariable Long id) {
+        return R.ok(wearService.deleteSession(SecurityUtil.getCurrentUserId(), id));
+    }
+
     @Operation(summary = "读取每日目标", description = "未设置返回默认 20h")
     @GetMapping("/goal")
     public R<GoalVO> getGoal() {
@@ -90,5 +117,14 @@ public class WearController {
     @GetMapping("/aligner/{alignerId}/summary")
     public R<WearAlignerSummaryVO> alignerSummary(@PathVariable Long alignerId) {
         return R.ok(wearService.alignerSummary(SecurityUtil.getCurrentUserId(), alignerId));
+    }
+
+    /** 解析 yyyy-MM-dd，非法抛佩戴参数错误（避免 500）。 */
+    private static LocalDate parseDate(String date) {
+        try {
+            return LocalDate.parse(date);
+        } catch (DateTimeParseException e) {
+            throw new BusinessException(ErrorCode.WEAR_PARAM_INVALID, "日期格式应为 yyyy-MM-dd");
+        }
     }
 }

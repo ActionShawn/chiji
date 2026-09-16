@@ -6,13 +6,16 @@ import com.chiji.common.core.exception.ErrorCode;
 import com.chiji.entity.UserSetting;
 import com.chiji.entity.WearDailySummary;
 import com.chiji.entity.WearSession;
+import com.chiji.entity.WearSessionEditLog;
 import com.chiji.enums.WearReminderTypeEnum;
 import com.chiji.enums.WearSourceEnum;
 import com.chiji.module.message.service.ReminderNotifyService;
 import com.chiji.module.stage.service.AlignerService;
 import com.chiji.module.wear.dto.WearMakeupRequest;
 import com.chiji.module.wear.dto.WearMorningBackfillRequest;
+import com.chiji.module.wear.dto.WearSessionEditRequest;
 import com.chiji.module.wear.mapper.WearDailySummaryMapper;
+import com.chiji.module.wear.mapper.WearSessionEditLogMapper;
 import com.chiji.module.wear.mapper.WearSessionMapper;
 import com.chiji.module.wear.mapper.WearUserSettingMapper;
 import com.chiji.module.wear.service.WearService;
@@ -40,6 +43,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.TreeMap;
 
 /**
@@ -59,10 +63,11 @@ public class WearServiceImpl implements WearService {
     private static final int MAX_GOAL_SEC = (int) (22.0 * 3600);
     /** 目标步进 0.5h（秒） */
     private static final int GOAL_STEP_SEC = (int) (0.5 * 3600);
-    /** 校准补录可回补的最早自然日偏移（今天-7） */
-    private static final long MAKEUP_BACK_DAYS = 7;
+    /** 校准补录可回补的最早自然日偏移（今天-6，含今天共 7 天可补录/修正） */
+    private static final long MAKEUP_BACK_DAYS = 6;
 
     private final WearSessionMapper wearSessionMapper;
+    private final WearSessionEditLogMapper wearSessionEditLogMapper;
     private final WearDailySummaryMapper wearDailySummaryMapper;
     private final WearUserSettingMapper wearUserSettingMapper;
     private final WearSettleService wearSettleService;
@@ -127,8 +132,8 @@ public class WearServiceImpl implements WearService {
         LocalDateTime now = WearTimes.now();
         LocalDate today = now.toLocalDate();
         LocalDate date = parseDate(req.date());
-        // 只允许补录 [今天-7, 昨天]
-        if (date.isBefore(today.minusDays(MAKEUP_BACK_DAYS)) || !date.isBefore(today)) {
+        // 只允许补录 [今天-6, 今天]（最近 7 天含今天）
+        if (date.isBefore(today.minusDays(MAKEUP_BACK_DAYS)) || date.isAfter(today)) {
             throw new BusinessException(ErrorCode.WEAR_MAKEUP_OUT_OF_RANGE);
         }
 
@@ -145,6 +150,10 @@ public class WearServiceImpl implements WearService {
             }
             LocalDateTime start = date.atTime(st);
             LocalDateTime end = date.atTime(et);
+            // 今天补录：结束不得晚于当前时刻
+            if (date.equals(today) && end.isAfter(now)) {
+                throw new BusinessException(ErrorCode.WEAR_MAKEUP_TIME_INVALID, "结束时间不能晚于当前时间");
+            }
             if (prevEnd != null && start.isBefore(prevEnd)) {
                 throw new BusinessException(ErrorCode.WEAR_MAKEUP_OVERLAP, "补录时间段不能相互重叠");
             }
@@ -396,6 +405,118 @@ public class WearServiceImpl implements WearService {
         );
     }
 
+    // ── 会话增删改（时长校准） ───────────────────────────────
+
+    @Override
+    public List<TodaySessionVO> sessions(Long userId, LocalDate date) {
+        LocalDateTime now = WearTimes.now();
+        LocalDateTime dayStart = WearTimes.startOf(date);
+        LocalDateTime dayCap = date.equals(now.toLocalDate()) ? now : WearTimes.endOf(date);
+        List<TodaySessionVO> vos = new ArrayList<>();
+        for (WearSession s : sessionsOverlapping(userId, dayStart, dayCap)) {
+            LocalDateTime[] clip = WearDayMath.clip(s, date, dayCap);
+            if (clip == null) {
+                continue;
+            }
+            boolean wearing = s.getEndedAt() == null;
+            long dur = wearing
+                    ? Duration.between(clip[0], now).getSeconds()
+                    : Duration.between(clip[0], clip[1]).getSeconds();
+            vos.add(new TodaySessionVO(
+                    s.getId(),
+                    s.getSource(),
+                    s.getMakeupFor() == null ? null : s.getMakeupFor().toString(),
+                    WearTimes.toEpochMillis(clip[0]),
+                    clip[1] == null ? null : WearTimes.toEpochMillis(clip[1]),
+                    Math.max(0, dur),
+                    wearing,
+                    WearTimes.toEpochMillis(s.getStartedAt()),
+                    s.getEdited() != null && s.getEdited() == 1
+            ));
+        }
+        return vos;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public TodayWearVO updateSession(Long userId, Long sessionId, WearSessionEditRequest req) {
+        WearSession session = wearSessionMapper.selectById(sessionId);
+        if (session == null || !userId.equals(session.getUserId())) {
+            throw new BusinessException(ErrorCode.WEAR_SESSION_NOT_FOUND);
+        }
+        LocalDateTime now = WearTimes.now();
+        LocalDate date = session.getStartedAt().toLocalDate();
+        boolean wearing = session.getEndedAt() == null;
+
+        LocalDateTime newStart = parseDateTime(date, req.start(), "戴上时间");
+        LocalDateTime newEnd;
+        if (wearing) {
+            // 佩戴中：只允许改开始时间，结束保持空（结束佩戴走主按钮「我摘下了」）
+            if (req.end() != null && !req.end().isBlank()) {
+                throw new BusinessException(ErrorCode.WEAR_EDIT_FORBIDDEN, "佩戴中的会话不能设置结束时间，请走「我摘下了」");
+            }
+            newEnd = null;
+        } else {
+            newEnd = parseDateTime(date, req.end(), "摘下时间");
+            if (!newEnd.isAfter(newStart)) {
+                throw new BusinessException(ErrorCode.WEAR_MAKEUP_TIME_INVALID, "摘下时刻需晚于戴上时刻");
+            }
+        }
+        // 未来时间（仅今天）与跨日结束
+        if (date.equals(now.toLocalDate()) && (newStart.isAfter(now) || (newEnd != null && newEnd.isAfter(now)))) {
+            throw new BusinessException(ErrorCode.WEAR_MAKEUP_TIME_INVALID, "时间不能晚于当前时刻");
+        }
+        if (newEnd != null && !newEnd.toLocalDate().equals(date)) {
+            throw new BusinessException(ErrorCode.WEAR_MAKEUP_TIME_INVALID, "结束时间不得跨到次日（跨夜请在起始日编辑）");
+        }
+
+        boolean startChanged = !session.getStartedAt().equals(newStart);
+        boolean endChanged = !Objects.equals(session.getEndedAt(), newEnd);
+        boolean changed = startChanged || endChanged;
+        if (changed && hasOverlapExcluding(userId, newStart, newEnd, sessionId)) {
+            throw new BusinessException(ErrorCode.WEAR_MAKEUP_OVERLAP);
+        }
+        // 单日总时长 ≤24h（按有效会话集重算，涵盖本次修改）
+        if (dayTotalAfterEdit(userId, date, sessionId, session.getSource(), newStart, newEnd) > 24L * 3600) {
+            throw new BusinessException(ErrorCode.WEAR_MAKEUP_TIME_INVALID, "单日佩戴时长不能超过 24 小时");
+        }
+
+        // 留痕（改前值），MANUAL 编辑后置「修正」标
+        if (startChanged) {
+            logEdit(userId, sessionId, "TIME_START", "started_at", session.getStartedAt(), newStart);
+            session.setStartedAt(newStart);
+        }
+        if (endChanged && newEnd != null) {
+            logEdit(userId, sessionId, "TIME_END", "ended_at", session.getEndedAt(), newEnd);
+            session.setEndedAt(newEnd);
+        }
+        if (changed && WearSourceEnum.MANUAL.getCode().equals(session.getSource())) {
+            session.setEdited(1);
+        }
+        wearSessionMapper.updateById(session);
+        log.info("佩戴会话编辑, userId={}, sessionId={}, {}-{}", userId, sessionId, newStart, newEnd);
+        wearSettleService.settleDay(userId, date);
+        return readToday(userId);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public TodayWearVO deleteSession(Long userId, Long sessionId) {
+        WearSession session = wearSessionMapper.selectById(sessionId);
+        if (session == null || !userId.equals(session.getUserId())) {
+            throw new BusinessException(ErrorCode.WEAR_SESSION_NOT_FOUND);
+        }
+        if (!WearSourceEnum.MAKEUP.getCode().equals(session.getSource())) {
+            throw new BusinessException(ErrorCode.WEAR_EDIT_FORBIDDEN, "仅补录段可删除");
+        }
+        LocalDate date = session.getMakeupFor() == null ? session.getStartedAt().toLocalDate() : session.getMakeupFor();
+        logEdit(userId, sessionId, "DELETE", "", session.getStartedAt(), null);
+        wearSessionMapper.deleteById(sessionId);
+        log.info("佩戴补录段删除, userId={}, sessionId={}, date={}", userId, sessionId, date);
+        wearSettleService.settleDay(userId, date);
+        return readToday(userId);
+    }
+
     // ── 内部读取 ────────────────────────────────────────────
 
     /**
@@ -435,7 +556,8 @@ public class WearServiceImpl implements WearService {
                     Math.max(0, dur),
                     wearing,
                     // 会话真实起始：跨夜段据此刻画「昨 21:03」文案（startTime 已被裁剪到今日 00:00）
-                    WearTimes.toEpochMillis(s.getStartedAt())
+                    WearTimes.toEpochMillis(s.getStartedAt()),
+                    s.getEdited() != null && s.getEdited() == 1
             ));
         }
 
@@ -514,6 +636,68 @@ public class WearServiceImpl implements WearService {
                 .and(w -> w.isNull(WearSession::getEndedAt).or().gt(WearSession::getEndedAt, start))
                 .last("LIMIT 1"));
         return !overlaps.isEmpty();
+    }
+
+    /** 与候选区间是否重叠（排除某会话自身；end 为 null 表示无限开放）。 */
+    private boolean hasOverlapExcluding(Long userId, LocalDateTime start, LocalDateTime end, Long excludeId) {
+        List<WearSession> overlaps = wearSessionMapper.selectList(new LambdaQueryWrapper<WearSession>()
+                .eq(WearSession::getUserId, userId)
+                .ne(WearSession::getId, excludeId)
+                .lt(WearSession::getStartedAt, end == null ? LocalDateTime.MAX : end)
+                .and(w -> w.isNull(WearSession::getEndedAt).or().gt(WearSession::getEndedAt, start))
+                .last("LIMIT 1"));
+        return !overlaps.isEmpty();
+    }
+
+    /** 编辑后某自然日总佩戴秒（用新时间替换该会话后按日切分），用于单日 ≤24h 校验。 */
+    private long dayTotalAfterEdit(Long userId, LocalDate date, Long sessionId, String source,
+                                   LocalDateTime newStart, LocalDateTime newEnd) {
+        LocalDateTime dayStart = WearTimes.startOf(date);
+        List<WearSession> daySessions = wearSessionMapper.selectList(new LambdaQueryWrapper<WearSession>()
+                .eq(WearSession::getUserId, userId)
+                .lt(WearSession::getStartedAt, WearTimes.endOf(date))
+                .and(w -> w.isNull(WearSession::getEndedAt).or().ge(WearSession::getEndedAt, dayStart)));
+        List<WearSession> effective = new ArrayList<>(daySessions.size());
+        for (WearSession s : daySessions) {
+            if (s.getId().equals(sessionId)) {
+                WearSession copy = new WearSession();
+                copy.setUserId(userId);
+                copy.setSource(source);
+                copy.setStartedAt(newStart);
+                copy.setEndedAt(newEnd);
+                effective.add(copy);
+            } else {
+                effective.add(s);
+            }
+        }
+        Map<LocalDate, WearDayMath.DaySecs> map = WearDayMath.distribute(effective, date, date, WearTimes.now());
+        return WearDayMath.dayOrZero(map, date).wear();
+    }
+
+    /** 写入一条会话编辑留痕。 */
+    private void logEdit(Long userId, Long sessionId, String editType, String field,
+                         LocalDateTime before, LocalDateTime after) {
+        WearSessionEditLog log = new WearSessionEditLog();
+        log.setSessionId(sessionId);
+        log.setUserId(userId);
+        log.setEditType(editType);
+        log.setField(field);
+        log.setBeforeValue(before);
+        log.setAfterValue(after);
+        log.setPointsCost(0);
+        wearSessionEditLogMapper.insert(log);
+    }
+
+    /** 某自然日的 HH:mm → LocalDateTime，缺失/格式非法抛错。 */
+    private LocalDateTime parseDateTime(LocalDate date, String hm, String label) {
+        if (hm == null || hm.isBlank()) {
+            throw new BusinessException(ErrorCode.WEAR_PARAM_INVALID, label + "不能为空");
+        }
+        LocalTime t = parseTime(hm);
+        if (t == null) {
+            throw new BusinessException(ErrorCode.WEAR_PARAM_INVALID, label + "格式应为 HH:mm");
+        }
+        return date.atTime(t);
     }
 
     /** 查询与 [dayStart, cap) 可能相交的会话（含佩戴中），升序。 */

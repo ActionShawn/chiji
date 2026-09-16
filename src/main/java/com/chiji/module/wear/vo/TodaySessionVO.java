@@ -11,6 +11,7 @@ package com.chiji.module.wear.vo;
  * @param durationSec 今日区间内归属秒
  * @param wearing    是否佩戴中
  * @param originStartTime 会话真实起始 epoch 毫秒（未跨夜时与 startTime 相同；跨夜段据此展示「昨 21:03」）
+ * @param edited    是否被手动修正过（MANUAL 编辑后置 1，展示「修正」标签）
  */
 public record TodaySessionVO(
         Long id,
@@ -20,6 +21,7 @@ public record TodaySessionVO(
         Long endTime,
         Long durationSec,
         Boolean wearing,
-        Long originStartTime
+        Long originStartTime,
+        Boolean edited
 ) {
 }

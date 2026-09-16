@@ -219,6 +219,7 @@ CREATE TABLE IF NOT EXISTS `wear_session` (
     `makeup_for` DATE        DEFAULT NULL COMMENT '补录目标自然日（仅 source=MAKEUP 有值；补录段按该日全额归属）',
     `started_at` DATETIME(3) NOT NULL COMMENT '戴上时间（可回填到过去；跨午夜不预拆）',
     `ended_at`   DATETIME(3) DEFAULT NULL COMMENT '摘下时间（佩戴中为 null）',
+    `edited`     TINYINT(1)  NOT NULL DEFAULT 0 COMMENT '是否被手动修正过（MANUAL 编辑后置 1，展示「修正」标）',
     `created_at` DATETIME    NOT NULL COMMENT '创建时间',
     `updated_at` DATETIME    NOT NULL COMMENT '更新时间',
     `deleted`    TINYINT(1)  NOT NULL DEFAULT 0 COMMENT '逻辑删除：0 正常 / 1 已删除',
@@ -226,6 +227,25 @@ CREATE TABLE IF NOT EXISTS `wear_session` (
     KEY `idx_wear_session_user_time` (`user_id`, `started_at`) COMMENT '按用户取佩戴段（结算/今日切分）',
     KEY `idx_wear_session_user_aligner` (`user_id`, `aligner_id`) COMMENT '按用户取某副佩戴段（本副统计）'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='佩戴会话表（物理佩戴段）';
+
+-- 佩戴会话编辑留痕（每次编辑/删除写一行，改前/改后 + 积分预留，人工审核可追溯）
+CREATE TABLE IF NOT EXISTS `wear_session_edit_log` (
+    `id`           BIGINT      NOT NULL COMMENT '主键（雪花算法生成）',
+    `session_id`   BIGINT      NOT NULL COMMENT '关联会话 id',
+    `user_id`      BIGINT      NOT NULL COMMENT '操作用户 ID',
+    `edit_type`    VARCHAR(16) NOT NULL COMMENT '操作类型：TIME_START / TIME_END / CREATE / DELETE',
+    `field`        VARCHAR(32) NOT NULL COMMENT '改动字段：started_at / ended_at',
+    `before_value` DATETIME(3) DEFAULT NULL COMMENT '修改前值',
+    `after_value`  DATETIME(3) DEFAULT NULL COMMENT '修改后值',
+    `points_cost`  INT         NOT NULL DEFAULT 0 COMMENT '本次消耗积分（当前 0，后续积分系统启用后填写）',
+    `created_at`   DATETIME    NOT NULL COMMENT '创建时间',
+    `deleted`      TINYINT(1)  NOT NULL DEFAULT 0 COMMENT '逻辑删除：0 正常 / 1 已删除',
+    PRIMARY KEY (`id`),
+    KEY `idx_edit_log_session` (`session_id`) COMMENT '按会话查留痕',
+    KEY `idx_edit_log_user` (`user_id`) COMMENT '按用户查留痕'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='佩戴会话编辑留痕表';
+
+-- 存量库升级（已有 wear_session 表时执行一次）：ALTER TABLE `wear_session` ADD COLUMN `edited` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否被手动修正过';
 
 -- 每日佩戴结算（物化，天然日 = Asia/Shanghai）
 CREATE TABLE IF NOT EXISTS `wear_daily_summary` (

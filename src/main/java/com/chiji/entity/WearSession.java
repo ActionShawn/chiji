@@ -52,6 +52,9 @@ public class WearSession {
     /** 摘下时间（佩戴中为 null） */
     private LocalDateTime endedAt;
 
+    /** 是否被手动修正过（MANUAL 编辑后置 1，展示「修正」标签） */
+    private Integer edited;
+
     /** 创建时间，插入时自动填充 */
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;

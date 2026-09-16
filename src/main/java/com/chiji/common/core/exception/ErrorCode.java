@@ -80,6 +80,10 @@ public enum ErrorCode {
     WEAR_ALIGNER_NOT_FOUND(70007, "牙套副不存在"),
     /** 佩戴参数不合法（时间格式/动作取值/补录时段等）。 */
     WEAR_PARAM_INVALID(70008, "佩戴参数不合法"),
+    /** 该佩戴记录不可编辑/删除（如删除正常打卡记录）。 */
+    WEAR_EDIT_FORBIDDEN(70009, "该佩戴记录不可编辑/删除"),
+    /** 佩戴记录不存在（会话级编辑/删除时归属校验失败）。 */
+    WEAR_SESSION_FORBIDDEN(70010, "无权编辑该佩戴记录"),
     // 80000+ 消息/通知模块
     /** 消息不存在。 */
     MESSAGE_NOT_FOUND(80001, "消息不存在"),
