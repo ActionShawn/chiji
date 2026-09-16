@@ -65,6 +65,12 @@ public class WearServiceImpl implements WearService {
     private static final int GOAL_STEP_SEC = (int) (0.5 * 3600);
     /** 校准补录可回补的最早自然日偏移（今天-6，含今天共 7 天可补录/修正） */
     private static final long MAKEUP_BACK_DAYS = 6;
+    /**
+     * 会话重叠查询中「开放段（佩戴中，无结束时间）」使用的伪无穷上限。
+     * 不能直接用 {@link LocalDateTime#MAX}（年份超出 MySQL DATETIME(3) 可绑定范围，驱动 setTimestamp 溢出抛 DateTimeException）；
+     * 9999-12-31T23:59:59 在 DATETIME 范围内，对本业务即为「无穷早于任意会话起始」。
+     */
+    private static final LocalDateTime OPEN_END_FAR_FUTURE = LocalDateTime.of(9999, 12, 31, 23, 59, 59);
 
     private final WearSessionMapper wearSessionMapper;
     private final WearSessionEditLogMapper wearSessionEditLogMapper;
@@ -632,7 +638,7 @@ public class WearServiceImpl implements WearService {
     private boolean hasOverlap(Long userId, LocalDateTime start, LocalDateTime end) {
         List<WearSession> overlaps = wearSessionMapper.selectList(new LambdaQueryWrapper<WearSession>()
                 .eq(WearSession::getUserId, userId)
-                .lt(WearSession::getStartedAt, end == null ? LocalDateTime.MAX : end)
+                .lt(WearSession::getStartedAt, end == null ? OPEN_END_FAR_FUTURE : end)
                 .and(w -> w.isNull(WearSession::getEndedAt).or().gt(WearSession::getEndedAt, start))
                 .last("LIMIT 1"));
         return !overlaps.isEmpty();
@@ -643,7 +649,7 @@ public class WearServiceImpl implements WearService {
         List<WearSession> overlaps = wearSessionMapper.selectList(new LambdaQueryWrapper<WearSession>()
                 .eq(WearSession::getUserId, userId)
                 .ne(WearSession::getId, excludeId)
-                .lt(WearSession::getStartedAt, end == null ? LocalDateTime.MAX : end)
+                .lt(WearSession::getStartedAt, end == null ? OPEN_END_FAR_FUTURE : end)
                 .and(w -> w.isNull(WearSession::getEndedAt).or().gt(WearSession::getEndedAt, start))
                 .last("LIMIT 1"));
         return !overlaps.isEmpty();
