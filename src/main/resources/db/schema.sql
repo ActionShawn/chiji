@@ -322,9 +322,10 @@ CREATE TABLE IF NOT EXISTS `ai_message` (
 
 -- 登录日志（管理后台 P2 采集层：登录成功异步落 1 条）
 CREATE TABLE IF NOT EXISTS `login_log` (
-    `id`       BIGINT      NOT NULL COMMENT '主键（雪花算法生成）',
-    `user_id`  BIGINT      NOT NULL COMMENT '用户 ID',
-    `login_at` DATETIME(3) NOT NULL COMMENT '登录时刻',
+    `id`         BIGINT      NOT NULL COMMENT '主键（雪花算法生成）',
+    `user_id`    BIGINT      NOT NULL COMMENT '用户 ID',
+    `login_at`   DATETIME(3) NOT NULL COMMENT '登录时刻',
+    `created_at` DATETIME    NOT NULL COMMENT '创建时间（代码插入时自动填充）',
     PRIMARY KEY (`id`),
     KEY `idx_user` (`user_id`),
     KEY `idx_login_at` (`login_at`)
