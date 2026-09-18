@@ -132,6 +132,23 @@ chiji:
       bucket: ${COS_BUCKET:}
       # 对外可访问 URL 前缀（Bucket 公网访问域名或 CDN 域名，如 https://xxx.cos.ap-shanghai.myqcloud.com）
       base-url: ${COS_BASE_URL:}
+  # 首页天气（和风天气）：Host/Key 属机密凭据，禁止写默认明文，须由环境变量注入；
+  # 未注入时 configured() 返回 false，接口直接降级，不影响启动。
+  weather:
+    enabled: ${CHIJI_WEATHER_ENABLED:true}
+    # 专属 API Host（和风控制台「项目」分配，形如 abcxyz.qweatherapi.com，不含协议）
+    host: ${WEATHER_API_HOST:}
+    key: ${WEATHER_API_KEY:}
+    cache:
+      # 实时天气缓存时长（分钟）：同城同区同小时共享，同一区县缓存期内只打一次三方
+      now-ttl-minutes: ${CHIJI_WEATHER_NOW_TTL:60}
+      # 城市反查缓存时长（分钟）：按取整坐标共享，默认 24h
+      geo-ttl-minutes: ${CHIJI_WEATHER_GEO_TTL:1440}
+    quota:
+      # 每自然月免费调用上限（和风「天气和基础服务」组：预报 + GeoAPI 同组累进）
+      monthly-limit: ${CHIJI_WEATHER_MONTHLY_LIMIT:50000}
+      # 安全水位比例：0.9 即月调用量达 45000 次触发熔断，停止调三方避免产生费用
+      safety-ratio: ${CHIJI_WEATHER_SAFETY_RATIO:0.9}
   # Spring AI 链路开关（false 时不注册 AI 相关 Bean，/api/ai/ping 返回未启用提示）
   ai:
     enabled: ${CHIJI_AI_ENABLED:false}
