@@ -5,12 +5,13 @@ import com.chiji.common.core.exception.ErrorCode;
 import com.chiji.common.util.RedisService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.MediaType;
-import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
+import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.util.UriComponentsBuilder;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -22,6 +23,7 @@ import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Locale;
+import java.util.zip.GZIPInputStream;
 
 /**
  * 和风天气客户端（首页天气唯一出网口）。
@@ -72,12 +74,13 @@ public class WeatherClient {
     private final WeatherProperties weatherProperties;
     private final RedisService redisService;
     private final RestClient restClient;
+    private final ObjectMapper objectMapper;
 
     /**
      * 构造天气客户端。
      * <p>
-     * 复用 {@code WxSubscribeClient} 的 converter 处理方式：三方接口偶发返回
-     * {@code text/plain}，需为 Jackson converter 追加该媒体类型支持。
+     * 响应统一以字节流接收、手动解压后经 Jackson 解析（见 {@link #fetchJson}），
+     * 不依赖 message converter，三方返回 {@code text/plain} 等非 JSON Content-Type 也能正常承接。
      *
      * @param weatherProperties 和风天气配置
      * @param restClientBuilder Spring Boot 自动配置的 RestClient 构建器
@@ -90,16 +93,8 @@ public class WeatherClient {
                          RedisService redisService) {
         this.weatherProperties = weatherProperties;
         this.redisService = redisService;
-        MappingJackson2HttpMessageConverter jsonConverter =
-                new MappingJackson2HttpMessageConverter(objectMapper);
-        jsonConverter.setSupportedMediaTypes(
-                List.of(MediaType.APPLICATION_JSON, MediaType.TEXT_PLAIN));
-        this.restClient = restClientBuilder
-                .messageConverters(converters -> {
-                    converters.removeIf(c -> c instanceof MappingJackson2HttpMessageConverter);
-                    converters.add(jsonConverter);
-                })
-                .build();
+        this.objectMapper = objectMapper;
+        this.restClient = restClientBuilder.build();
     }
 
     /**
@@ -209,11 +204,7 @@ public class WeatherClient {
                 String.format(Locale.ROOT, "%.2f,%.2f", lon, lat), StandardCharsets.UTF_8);
         URI uri = buildUri("/geo/v2/city/lookup", "location", location);
         try {
-            return restClient.get()
-                    .uri(uri)
-                    .header(API_KEY_HEADER, weatherProperties.getKey())
-                    .retrieve()
-                    .body(GeoResponse.class);
+            return fetchJson(uri, GeoResponse.class);
         } catch (Exception e) {
             log.error("和风城市反查调用失败, lon={}, lat={}", lon, lat, e);
             throw new BusinessException(ErrorCode.WEATHER_CALL_FAILED);
@@ -229,15 +220,45 @@ public class WeatherClient {
     private WeatherNowResponse requestNow(String locationId) {
         URI uri = buildUri("/v7/weather/now", "location", locationId);
         try {
-            return restClient.get()
-                    .uri(uri)
-                    .header(API_KEY_HEADER, weatherProperties.getKey())
-                    .retrieve()
-                    .body(WeatherNowResponse.class);
+            return fetchJson(uri, WeatherNowResponse.class);
         } catch (Exception e) {
             log.error("和风实时天气调用失败, locationId={}", locationId, e);
             throw new BusinessException(ErrorCode.WEATHER_CALL_FAILED);
         }
+    }
+
+    /**
+     * 请求和风接口并解析 JSON 响应。
+     * <p>
+     * 和风所有接口响应默认 Gzip 压缩，而 RestClient 默认请求工厂不自动解压，
+     * 直接经 Jackson converter 解析会因首字节 0x1F（gzip 魔数）触发
+     * {@code JsonParseException: Illegal character (CTRL-CHAR, code 31)}。
+     * 这里显式声明 {@code Accept-Encoding: gzip}，按响应头与魔数识别压缩体后
+     * 手动解压，未压缩时按原字节解析，兼容请求工厂已自动解压的场景。
+     *
+     * @param uri       请求 URI
+     * @param valueType 目标类型
+     * @param <T>       响应类型
+     * @return 解析后的响应对象
+     * @throws IOException 网络或解压/解析失败
+     */
+    private <T> T fetchJson(URI uri, Class<T> valueType) throws IOException {
+        byte[] body = restClient.get()
+                .uri(uri)
+                .header(HttpHeaders.ACCEPT_ENCODING, "gzip")
+                .header(API_KEY_HEADER, weatherProperties.getKey())
+                .retrieve()
+                .body(byte[].class);
+        if (body == null || body.length == 0) {
+            return null;
+        }
+        if (body[0] == (byte) 0x1f && body[1] == (byte) 0x8b) {
+            try (ByteArrayInputStream bin = new ByteArrayInputStream(body);
+                 GZIPInputStream gin = new GZIPInputStream(bin)) {
+                return objectMapper.readValue(gin, valueType);
+            }
+        }
+        return objectMapper.readValue(body, valueType);
     }
 
     /**
