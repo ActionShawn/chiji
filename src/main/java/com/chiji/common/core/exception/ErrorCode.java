@@ -94,7 +94,10 @@ public enum ErrorCode {
     /** 消息不存在。 */
     MESSAGE_NOT_FOUND(80001, "消息不存在"),
     /** 通知设置参数不合法。 */
-    NOTIFICATION_PARAM_INVALID(80002, "通知设置参数不合法");
+    NOTIFICATION_PARAM_INVALID(80002, "通知设置参数不合法"),
+    // 90000+ 常用工具配置模块
+    /** 常用工具配置不合法（key 格式/数量越界等）。 */
+    TOOL_CONFIG_PARAM_INVALID(90001, "常用工具配置不合法");
     // ──────────────────────────────────────────────────────────────
 
     /** 错误码。 */
