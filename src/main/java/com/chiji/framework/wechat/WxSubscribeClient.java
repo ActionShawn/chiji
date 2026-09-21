@@ -41,6 +41,7 @@ public class WxSubscribeClient {
 
     private final WechatProperties wechatProperties;
     private final RedisService redisService;
+    private final ObjectMapper objectMapper;
     private final RestClient restClient;
 
     /**
@@ -60,6 +61,7 @@ public class WxSubscribeClient {
                              RedisService redisService) {
         this.wechatProperties = wechatProperties;
         this.redisService = redisService;
+        this.objectMapper = objectMapper;
         MappingJackson2HttpMessageConverter jsonConverter =
                 new MappingJackson2HttpMessageConverter(objectMapper);
         jsonConverter.setSupportedMediaTypes(
@@ -93,8 +95,23 @@ public class WxSubscribeClient {
      * @return 微信返回 errcode == 0（下发成功）返回 true；否则记录日志并返回 false
      */
     public boolean sendAlignerChangeMessage(String openid, Map<String, Object> data) {
+        WxSendResult result = trySendAlignerChangeMessage(openid, data);
+        return result.errcode() == null || result.errcode() == 0;
+    }
+
+    /**
+     * 直接下发换副提醒订阅消息并透传微信原始 errcode/errmsg，供开发测试联调用。
+     * <p>
+     * 与 {@link #sendAlignerChangeMessage} 走同一发送链路，但不经额度记账、不回写推送状态；
+     * 本地异常（openid 为空 / token 获取失败 / 请求异常）以 {@code errcode = -1} 表示，日志照常记录。
+     *
+     * @param openid 用户 openid
+     * @param data   模板数据（须覆盖模板定义的全部关键词，否则微信返回 47003）
+     * @return 下发结果；errcode == 0 表示成功
+     */
+    public WxSendResult trySendAlignerChangeMessage(String openid, Map<String, Object> data) {
         if (openid == null || openid.isBlank()) {
-            return false;
+            return new WxSendResult(-1, "openid 为空");
         }
         WechatProperties.Subscribe subscribe = wechatProperties.getSubscribe();
         String token;
@@ -102,10 +119,10 @@ public class WxSubscribeClient {
             token = getAccessToken();
         } catch (Exception e) {
             log.error("获取微信 access_token 失败", e);
-            return false;
+            return new WxSendResult(-1, "获取 access_token 失败: " + e.getMessage());
         }
         if (token == null || token.isBlank()) {
-            return false;
+            return new WxSendResult(-1, "获取 access_token 失败（token 为空）");
         }
 
         Map<String, Object> body = new LinkedHashMap<>();
@@ -126,26 +143,28 @@ public class WxSubscribeClient {
 
         WxSubscribeResponse response;
         try {
+            // 必须先序列化为 byte[] 再发：Spring 6.1+ 对对象 body 采用流式发送（chunked、无
+            // Content-Length），微信网关校验该头不过会直接返回 412 Precondition Failed [no body]
+            byte[] payload = objectMapper.writeValueAsBytes(body);
             response = restClient.post()
                     .uri(uri)
                     .contentType(MediaType.APPLICATION_JSON)
-                    .body(body)
+                    .body(payload)
                     .retrieve()
                     .body(WxSubscribeResponse.class);
         } catch (Exception e) {
             log.error("下发微信订阅消息异常, openid={}", openid, e);
-            return false;
+            return new WxSendResult(-1, e.getClass().getSimpleName() + ": " + e.getMessage());
         }
         if (response == null) {
             log.warn("下发微信订阅消息返回为空, openid={}", openid);
-            return false;
+            return new WxSendResult(-1, "微信返回为空");
         }
         if (response.errcode() != null && response.errcode() != 0) {
             log.warn("下发微信订阅消息失败, openid={}, errcode={}, errmsg={}",
                     openid, response.errcode(), response.errmsg());
-            return false;
         }
-        return true;
+        return new WxSendResult(response.errcode(), response.errmsg());
     }
 
     /**
@@ -199,6 +218,15 @@ public class WxSubscribeClient {
                                          Integer expires_in,
                                          Integer errcode,
                                          String errmsg) {
+    }
+
+    /**
+     * 微信订阅消息下发结果（供开发测试接口透传微信原始错误码）。
+     *
+     * @param errcode 微信错误码；0 表示成功，-1 表示本地异常（非微信返回），null 表示未携带
+     * @param errmsg  错误信息
+     */
+    public record WxSendResult(Integer errcode, String errmsg) {
     }
 
     /**
