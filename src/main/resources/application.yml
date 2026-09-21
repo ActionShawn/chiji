@@ -167,3 +167,6 @@ chiji:
   track:
     # 单用户每小时上报上限（正常前后台切换一天几十次）
     session-rate-limit-per-hour: 30
+  # 开发者在线测试模块（/api/dev/**）：默认关闭；开启后该前缀路由免登录，仅联调环境临时打开
+  dev-test:
+    enabled: ${CHIJI_DEV_TEST_ENABLED:false}

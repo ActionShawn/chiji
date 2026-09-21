@@ -37,6 +37,8 @@ public class SaTokenConfig implements WebMvcConfigurer {
                         .match("/api/**")
                         .notMatch(SaHttpMethod.OPTIONS)
                         .notMatch("/api/auth/login", "/api/ping", "/api/ai/ping")
+                        // 开发者在线测试模块：路由本身由 chiji.dev-test.enabled 开关注册，仅联调用
+                        .notMatch("/api/dev/**")
                         .check(r -> StpUtil.checkLogin())
                         // 管理端路由：登录之上叠加角色校验，非管理员返回 403
                         .match("/api/admin/**")
