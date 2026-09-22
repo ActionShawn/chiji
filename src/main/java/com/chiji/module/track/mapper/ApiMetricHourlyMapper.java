@@ -5,6 +5,7 @@ import com.chiji.common.core.dto.DayValueRow;
 import com.chiji.entity.ApiMetricHourly;
 import com.chiji.module.track.dto.ApiHourlyRow;
 import com.chiji.module.track.dto.ApiStatsRow;
+import com.chiji.module.track.dto.MetricTrendRow;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Param;
@@ -93,4 +94,40 @@ public interface ApiMetricHourlyMapper extends BaseMapper<ApiMetricHourly> {
             + "MAX(max_ms) AS max_ms FROM api_metric_hourly "
             + "WHERE api = #{api} AND stat_date = #{statDate} GROUP BY hour ORDER BY hour")
     List<ApiHourlyRow> hourlyByApi(@Param("api") String api, @Param("statDate") LocalDate statDate);
+
+    /**
+     * 全接口按小时聚合（管理端运维看板当日折线）。
+     *
+     * @param statDate 统计日期
+     * @return 每小时行（label=两位小时「09」，无数据小时由 service 补 0）
+     */
+    @Select("SELECT LPAD(hour, 2, '0') AS label, SUM(cnt) AS cnt, SUM(err_cnt) AS err_cnt, "
+            + "MAX(max_ms) AS max_ms FROM api_metric_hourly "
+            + "WHERE stat_date = #{statDate} GROUP BY hour ORDER BY hour")
+    List<MetricTrendRow> metricTrendByHour(@Param("statDate") LocalDate statDate);
+
+    /**
+     * 全接口按日聚合（管理端运维看板近 7/30 天折线）。
+     *
+     * @param start 起始日期（含）
+     * @param end   结束日期（含）
+     * @return 每日行（label=「2026-09-20」，无数据日由 service 补 0）
+     */
+    @Select("SELECT DATE_FORMAT(stat_date, '%Y-%m-%d') AS label, SUM(cnt) AS cnt, "
+            + "SUM(err_cnt) AS err_cnt, MAX(max_ms) AS max_ms FROM api_metric_hourly "
+            + "WHERE stat_date >= #{start} AND stat_date <= #{end} GROUP BY stat_date ORDER BY stat_date")
+    List<MetricTrendRow> metricTrendByDay(@Param("start") LocalDate start, @Param("end") LocalDate end);
+
+    /**
+     * 全接口按月聚合（管理端运维看板全部折线）。
+     *
+     * @param start 起始日期（含）
+     * @param end   结束日期（含）
+     * @return 每月行（label=「2026-09」，无数据月份由 service 补 0）
+     */
+    @Select("SELECT DATE_FORMAT(stat_date, '%Y-%m') AS label, SUM(cnt) AS cnt, "
+            + "SUM(err_cnt) AS err_cnt, MAX(max_ms) AS max_ms FROM api_metric_hourly "
+            + "WHERE stat_date >= #{start} AND stat_date <= #{end} "
+            + "GROUP BY label ORDER BY label")
+    List<MetricTrendRow> metricTrendByMonth(@Param("start") LocalDate start, @Param("end") LocalDate end);
 }

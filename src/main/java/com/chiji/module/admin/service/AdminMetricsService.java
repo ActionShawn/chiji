@@ -3,6 +3,7 @@ package com.chiji.module.admin.service;
 import com.chiji.common.core.page.CursorPage;
 import com.chiji.module.admin.vo.ApiHourlyVO;
 import com.chiji.module.admin.vo.ApiStatsVO;
+import com.chiji.module.admin.vo.ApiTrendVO;
 import com.chiji.module.admin.vo.SlowApiLogVO;
 
 import java.time.LocalDate;
@@ -18,10 +19,19 @@ public interface AdminMetricsService {
     /**
      * 接口监控聚合列表（调用量倒序）。
      *
-     * @param days 统计天数（1-30，含今日，默认 7）
+     * @param range 区间：all（全部历史）；可空
+     * @param days  统计天数（1-30，含今日，默认 7；range=all 时忽略）
      * @return 接口聚合行
      */
-    List<ApiStatsVO> apiList(int days);
+    List<ApiStatsVO> apiList(String range, int days);
+
+    /**
+     * 接口趋势序列（运维看板折线：调用次数 / 最大耗时）。
+     *
+     * @param range 区间：day / week / month / all，非法值按 day
+     * @return 数据点序列（缺数据分组补 0）
+     */
+    ApiTrendVO trend(String range);
 
     /**
      * 单接口某日 24 小时分布。

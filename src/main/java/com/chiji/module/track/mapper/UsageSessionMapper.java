@@ -2,7 +2,9 @@ package com.chiji.module.track.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.chiji.common.core.dto.DayValueRow;
+import com.chiji.common.core.dto.LabelValueRow;
 import com.chiji.entity.UsageSession;
+import com.chiji.module.track.dto.UsageRankRow;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -76,4 +78,45 @@ public interface UsageSessionMapper extends BaseMapper<UsageSession> {
             + "GROUP BY DATE(enter_at)")
     List<DayValueRow> countDistinctUsersByDay(@Param("start") LocalDateTime start,
                                               @Param("end") LocalDateTime end);
+
+    /**
+     * 按小时使用时长总和（秒，管理端看板当日趋势）。
+     *
+     * @param start 起始时刻（含）
+     * @param end   结束时刻（不含）
+     * @return 每小时秒数（label=两位小时「09」）
+     */
+    @Select("SELECT DATE_FORMAT(enter_at, '%H') AS label, COALESCE(SUM(duration_sec), 0) AS value "
+            + "FROM usage_session WHERE enter_at >= #{start} AND enter_at < #{end} "
+            + "GROUP BY label")
+    List<LabelValueRow> sumDurationSecByHour(@Param("start") LocalDateTime start,
+                                             @Param("end") LocalDateTime end);
+
+    /**
+     * 按月使用时长总和（秒，管理端看板全部趋势）。
+     *
+     * @param start 起始时刻（含）
+     * @param end   结束时刻（不含）
+     * @return 每月秒数（label=「2026-09」）
+     */
+    @Select("SELECT DATE_FORMAT(enter_at, '%Y-%m') AS label, COALESCE(SUM(duration_sec), 0) AS value "
+            + "FROM usage_session WHERE enter_at >= #{start} AND enter_at < #{end} "
+            + "GROUP BY label")
+    List<LabelValueRow> sumDurationSecByMonth(@Param("start") LocalDateTime start,
+                                              @Param("end") LocalDateTime end);
+
+    /**
+     * 区间内用户使用时长排行（管理端运营看板，时长倒序取前 N）。
+     *
+     * @param start 起始时刻（含）
+     * @param end   结束时刻（不含）
+     * @param limit 取前 N 名
+     * @return 排行行（userId + 时长秒数）
+     */
+    @Select("SELECT user_id AS userId, COALESCE(SUM(duration_sec), 0) AS totalSec "
+            + "FROM usage_session WHERE enter_at >= #{start} AND enter_at < #{end} "
+            + "GROUP BY user_id ORDER BY totalSec DESC LIMIT #{limit}")
+    List<UsageRankRow> rankByDuration(@Param("start") LocalDateTime start,
+                                      @Param("end") LocalDateTime end,
+                                      @Param("limit") int limit);
 }

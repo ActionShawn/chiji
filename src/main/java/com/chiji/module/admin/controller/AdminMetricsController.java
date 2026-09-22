@@ -5,6 +5,7 @@ import com.chiji.common.core.result.R;
 import com.chiji.module.admin.service.AdminMetricsService;
 import com.chiji.module.admin.vo.ApiHourlyVO;
 import com.chiji.module.admin.vo.ApiStatsVO;
+import com.chiji.module.admin.vo.ApiTrendVO;
 import com.chiji.module.admin.vo.SlowApiLogVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -34,13 +35,27 @@ public class AdminMetricsController {
     /**
      * 接口监控聚合列表（调用量倒序）。
      *
-     * @param days 统计天数（1-30，含今日，默认 7）
+     * @param range 区间：all（全部历史）；可空
+     * @param days  统计天数（1-30，含今日，默认 7；range=all 时忽略）
      * @return 接口聚合行
      */
     @Operation(summary = "接口列表", description = "区间内各接口调用量/失败数/失败率/慢请求数/最大耗时")
     @GetMapping("/api-list")
-    public R<List<ApiStatsVO>> apiList(@RequestParam(defaultValue = "7") int days) {
-        return R.ok(adminMetricsService.apiList(days));
+    public R<List<ApiStatsVO>> apiList(@RequestParam(required = false) String range,
+                                       @RequestParam(defaultValue = "7") int days) {
+        return R.ok(adminMetricsService.apiList(range, days));
+    }
+
+    /**
+     * 接口趋势序列（运维看板折线：调用次数 / 最大耗时）。
+     *
+     * @param range 区间：day / week / month / all，默认 day
+     * @return 数据点序列（缺数据分组补 0）
+     */
+    @Operation(summary = "接口趋势", description = "调用次数/失败数/最大耗时序列，粒度自适应小时/日/月")
+    @GetMapping("/trend")
+    public R<ApiTrendVO> trend(@RequestParam(defaultValue = "day") String range) {
+        return R.ok(adminMetricsService.trend(range));
     }
 
     /**

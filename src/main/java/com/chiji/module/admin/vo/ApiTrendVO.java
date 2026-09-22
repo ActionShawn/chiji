@@ -6,14 +6,14 @@ import lombok.Data;
 import java.util.List;
 
 /**
- * 管理端运营看板趋势 VO。
+ * 管理端运维看板接口趋势 VO。
  * <p>
  * 粒度随区间自适应：当天=小时（24 点）、近 7/30 天=日、全部=月；
- * 一次返回全部指标序列，前端本地切换趋势线不发请求。
+ * 调用次数与最大耗时两条折线同源返回，前端本地切换。
  */
 @Data
 @Builder
-public class AdminStatsTrendVO {
+public class ApiTrendVO {
 
     /** 区间：day / week / month / all */
     private String range;
@@ -34,19 +34,13 @@ public class AdminStatsTrendVO {
         /** 标签（小时「09」/ 日期「09-20」/ 月份「2026-09」） */
         private String label;
 
-        /** 新增用户数 */
-        private long newUsers;
+        /** 调用数 */
+        private long cnt;
 
-        /** 使用时长（秒） */
-        private long usageSec;
+        /** 失败数 */
+        private long errCnt;
 
-        /** 接口调用数 */
-        private long apiCalls;
-
-        /** 新增记录数 */
-        private long newRecords;
-
-        /** 新增照片数 */
-        private long newImages;
+        /** 最大耗时 ms */
+        private long maxMs;
     }
 }
