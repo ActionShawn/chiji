@@ -141,15 +141,15 @@ public class ClinicReminderServiceImpl implements ClinicReminderService {
         if (openid == null) {
             return;
         }
-        // 模板关键词以公众平台实际申请为准：thing1 提醒事项 / time2 复诊日期 / thing3 诊所医生
+        // 模板 571「日程提醒」关键词：thing2 提醒内容 / date4 日程时间 / thing10 地点（就诊·预约两场景共用）
         Map<String, Object> data = new LinkedHashMap<>();
-        data.put("thing1", Map.of("value", truncate("复诊提醒", 20)));
-        data.put("time2", Map.of("value", visit.getVisitDate().format(DateTimeFormatter.ofPattern("yyyy年M月d日"))));
+        data.put("thing2", Map.of("value", truncate("复诊提醒", 20)));
+        data.put("date4", Map.of("value", visit.getVisitDate().format(DateTimeFormatter.ofPattern("yyyy年M月d日"))));
         String place = visit.getClinicName() == null ? "线上预留" : visit.getClinicName();
         if (visit.getDoctorName() != null) {
             place += " · " + visit.getDoctorName();
         }
-        data.put("thing3", Map.of("value", truncate(place, 20)));
+        data.put("thing10", Map.of("value", truncate(place, 20)));
         if (!wxSubscribeClient.sendClinicVisitMessage(openid, data)) {
             return;
         }
@@ -172,12 +172,12 @@ public class ClinicReminderServiceImpl implements ClinicReminderService {
         if (openid == null) {
             return;
         }
-        // 模板关键词以公众平台实际申请为准：thing1 提醒事项 / time2 预计戴完日 / thing3 建议
+        // 模板 571「日程提醒」关键词：thing2 提醒内容 / date4 日程时间（预计戴完日）/ thing11 备注（建议语）
         Map<String, Object> data = new LinkedHashMap<>();
-        data.put("thing1", Map.of("value", truncate("最后一副临近戴完，记得预约复诊", 20)));
-        data.put("time2", Map.of("value",
+        data.put("thing2", Map.of("value", truncate("最后一副临近戴完，记得预约复诊", 20)));
+        data.put("date4", Map.of("value",
                 remindDate.plusDays(offset).format(DateTimeFormatter.ofPattern("yyyy年M月d日"))));
-        data.put("thing3", Map.of("value", truncate("确认进度并准备保持器", 20)));
+        data.put("thing11", Map.of("value", truncate("确认进度并准备保持器", 20)));
         if (!wxSubscribeClient.sendClinicBookMessage(openid, data)) {
             return;
         }
