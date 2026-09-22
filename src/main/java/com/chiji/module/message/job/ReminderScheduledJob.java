@@ -15,7 +15,7 @@ import org.springframework.stereotype.Component;
  * 矫正进度/问候类提醒定时任务（Asia/Shanghai 时区）。
  * <ul>
  *   <li>每小时整点：换副提醒（命中用户配置的提醒小时才判定，默认 07:00）；
- *       复诊提醒（就诊提醒 + 预约提醒，共用复诊提醒时刻，默认 07:00）</li>
+ *       复诊提醒（就诊提醒按就诊时刻、预约提醒按预约时刻，两者独立，均默认 07:00）</li>
  *   <li>09:00 晨间问候/关怀级联（召回 &gt; 连续未达标关怀 &gt; 节假日 &gt; 晨间问候）
  *       + 阶段「满一周」里程碑补发</li>
  *   <li>20:30 当日零记录催；周日 20:30 另发每周阶段小结</li>
@@ -67,8 +67,9 @@ public class ReminderScheduledJob {
     /**
      * 每小时整点扫描复诊提醒（Asia/Shanghai）：就诊提醒（全类型）+ 预约提醒（隐形最终副）。
      * <p>
-     * 先按 {@link NotificationSettingService#isClinicRemindHour(Long)} 过滤命中复诊提醒时刻的用户，
-     * 再分别交给 {@link ClinicReminderService#visitRemind(Long)} 与
+     * 就诊提醒按 {@link NotificationSettingService#isClinicRemindHour(Long)}、预约提醒按
+     * {@link NotificationSettingService#isBookRemindHour(Long)} 分别过滤命中时刻的用户
+     * （两者时刻独立），再分别交给 {@link ClinicReminderService#visitRemind(Long)} 与
      * {@link ClinicReminderService#bookRemind(Long)} 判定；门控与去重在服务内完成。
      */
     @Scheduled(cron = "0 0 * * * *", zone = "Asia/Shanghai")
@@ -81,13 +82,12 @@ public class ReminderScheduledJob {
         int failed = 0;
         for (Long userId : userService.listAllUserIds()) {
             try {
-                if (!notificationSettingService.isClinicRemindHour(userId)) {
-                    continue;
-                }
-                if (clinicReminderService.visitRemind(userId)) {
+                if (notificationSettingService.isClinicRemindHour(userId)
+                        && clinicReminderService.visitRemind(userId)) {
                     visit++;
                 }
-                if (clinicReminderService.bookRemind(userId)) {
+                if (notificationSettingService.isBookRemindHour(userId)
+                        && clinicReminderService.bookRemind(userId)) {
                     book++;
                 }
             } catch (Exception e) {

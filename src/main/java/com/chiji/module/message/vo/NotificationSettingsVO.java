@@ -15,9 +15,10 @@ import java.util.List;
  * @param alignerRemindTime   换副提醒时间（整点 {@code HH:00}，缺省 {@code 07:00}）
  * @param alignerRemindOffset 换副提醒时机偏移：-1 到期前一天 / 0 到期当天 / 1 到期后一天
  * @param subscribeRemain     一次性订阅剩余可下发次数（非订阅用户为 0）
- * @param clinicRemindTime    复诊提醒时刻（整点 {@code HH:00}，缺省 {@code 07:00}；就诊/预约提醒共用）
- * @param clinicVisitOffset   就诊提醒提前天数：0~3（0=当天，缺省 0）
- * @param clinicBookOffset    预约提醒提前天数：0~3（缺省 3，仅隐形最终副生效）
+ * @param clinicRemindTime    就诊提醒时刻（整点 {@code HH:00}，缺省 {@code 07:00}）
+ * @param clinicBookTime      预约提醒时刻（整点 {@code HH:00}，缺省 {@code 07:00}，独立于就诊提醒时刻）
+ * @param clinicVisitOffset   就诊提醒提前天数：0~2（0=当天，缺省 0）
+ * @param clinicBookOffset    预约提醒提前天数：0~2（缺省 2，仅隐形最终副生效）
  * @param clinicVisitRemain   就诊提醒订阅剩余可下发次数
  * @param clinicBookRemain    预约提醒订阅剩余可下发次数
  */
@@ -33,6 +34,7 @@ public record NotificationSettingsVO(
         Integer alignerRemindOffset,
         Integer subscribeRemain,
         String clinicRemindTime,
+        String clinicBookTime,
         Integer clinicVisitOffset,
         Integer clinicBookOffset,
         Integer clinicVisitRemain,

@@ -66,18 +66,29 @@ public interface NotificationSettingService {
     boolean isAlignerRemindHour(Long userId);
 
     /**
-     * 当前是否命中该用户的复诊提醒整点（就诊提醒与预约提醒共用时刻）。
+     * 当前是否命中该用户的就诊提醒整点。
      * <p>
      * 时刻存于 {@code user_setting.clinic_remind_time}（仅整点，缺省 07:00）；
-     * 定时任务按小时整点扫描，先按本方法筛掉非命中小时，再做复诊类判定。
+     * 定时任务按小时整点扫描，先按本方法筛掉非命中小时，再做就诊判定。
      *
      * @param userId 用户 ID
-     * @return 当前小时等于用户配置的复诊提醒小时返回 true
+     * @return 当前小时等于用户配置的就诊提醒小时返回 true
      */
     boolean isClinicRemindHour(Long userId);
 
     /**
-     * 用户配置的就诊提醒提前天数（0~3，0=当天；缺失或非法回退 0）。
+     * 当前是否命中该用户的预约提醒整点。
+     * <p>
+     * 时刻存于 {@code user_setting.clinic_book_time}（仅整点，缺省 07:00，独立于就诊提醒时刻）；
+     * 定时任务按小时整点扫描，先按本方法筛掉非命中小时，再做预约判定。
+     *
+     * @param userId 用户 ID
+     * @return 当前小时等于用户配置的预约提醒小时返回 true
+     */
+    boolean isBookRemindHour(Long userId);
+
+    /**
+     * 用户配置的就诊提醒提前天数（0~2，0=当天；缺失或非法回退 0）。
      *
      * @param userId 用户 ID
      * @return 提前天数
@@ -85,7 +96,7 @@ public interface NotificationSettingService {
     int clinicVisitOffset(Long userId);
 
     /**
-     * 用户配置的预约提醒提前天数（0~3；缺失或非法回退 3）。
+     * 用户配置的预约提醒提前天数（0~2；缺失或非法回退 2）。
      *
      * @param userId 用户 ID
      * @return 提前天数

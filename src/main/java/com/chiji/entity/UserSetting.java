@@ -53,13 +53,16 @@ public class UserSetting {
     /** 换副提醒时机偏移：-1 到期前一天 / 0 到期当天 / 1 到期后一天（缺省 0） */
     private Integer alignerRemindOffset;
 
-    /** 复诊提醒时刻（Asia/Shanghai，仅整点，缺省 07:00；就诊提醒与预约提醒共用） */
+    /** 复诊提醒时刻（Asia/Shanghai，仅整点，缺省 07:00；就诊提醒使用） */
     private LocalTime clinicRemindTime;
 
-    /** 就诊提醒提前天数：0 当天 / 1~3 提前 N 天（缺省 0） */
+    /** 预约提醒时刻（Asia/Shanghai，仅整点，缺省 07:00；独立于就诊提醒时刻） */
+    private LocalTime clinicBookTime;
+
+    /** 就诊提醒提前天数：0 当天 / 1~2 提前 N 天（缺省 0） */
     private Integer clinicVisitOffset;
 
-    /** 预约提醒提前天数：0~3 天（缺省 3，仅隐形最终副生效） */
+    /** 预约提醒提前天数：0~2 天（缺省 2，仅隐形最终副生效） */
     private Integer clinicBookOffset;
 
     /** 每日佩戴目标（秒，默认 20h=72000；可调 18.0–22.0h，步进 0.5h） */

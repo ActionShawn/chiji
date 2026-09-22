@@ -53,8 +53,9 @@ public class NotificationSettingServiceImpl implements NotificationSettingServic
     private static final LocalTime DEFAULT_ALIGNER_REMIND_TIME = LocalTime.of(7, 0);
     private static final int DEFAULT_ALIGNER_REMIND_OFFSET = 0;
     private static final LocalTime DEFAULT_CLINIC_REMIND_TIME = LocalTime.of(7, 0);
+    private static final LocalTime DEFAULT_CLINIC_BOOK_TIME = LocalTime.of(7, 0);
     private static final int DEFAULT_CLINIC_VISIT_OFFSET = 0;
-    private static final int DEFAULT_CLINIC_BOOK_OFFSET = 3;
+    private static final int DEFAULT_CLINIC_BOOK_OFFSET = 2;
 
     private final UserSettingMapper userSettingMapper;
     private final UserNotificationConfigMapper configMapper;
@@ -111,6 +112,9 @@ public class NotificationSettingServiceImpl implements NotificationSettingServic
         }
         if (req.clinicRemindTime() != null) {
             s.setClinicRemindTime(parseClinicRemindTime(req.clinicRemindTime()));
+        }
+        if (req.clinicBookTime() != null) {
+            s.setClinicBookTime(parseClinicRemindTime(req.clinicBookTime()));
         }
         if (req.clinicVisitOffset() != null) {
             if (!isClinicOffsetValid(req.clinicVisitOffset())) {
@@ -193,20 +197,29 @@ public class NotificationSettingServiceImpl implements NotificationSettingServic
         return WearTimes.now().getHour() == remindTime.getHour();
     }
 
-    /** 用户配置的就诊提醒提前天数（0~3）；缺失或非法回退 0（当天）。 */
+    @Override
+    public boolean isBookRemindHour(Long userId) {
+        UserSetting s = userSettingMapper.selectOne(new LambdaQueryWrapper<UserSetting>()
+                .eq(UserSetting::getUserId, userId));
+        LocalTime remindTime = s != null && s.getClinicBookTime() != null
+                ? s.getClinicBookTime() : DEFAULT_CLINIC_BOOK_TIME;
+        return WearTimes.now().getHour() == remindTime.getHour();
+    }
+
+    /** 用户配置的就诊提醒提前天数（0~2）；缺失或非法回退 0（当天）。 */
     public int clinicVisitOffset(Long userId) {
         UserSetting s = userSettingMapper.selectOne(new LambdaQueryWrapper<UserSetting>()
                 .eq(UserSetting::getUserId, userId));
         Integer offset = s == null ? null : s.getClinicVisitOffset();
-        return offset != null && offset >= 0 && offset <= 3 ? offset : DEFAULT_CLINIC_VISIT_OFFSET;
+        return offset != null && offset >= 0 && offset <= 2 ? offset : DEFAULT_CLINIC_VISIT_OFFSET;
     }
 
-    /** 用户配置的预约提醒提前天数（0~3）；缺失或非法回退 3（前 3 天）。 */
+    /** 用户配置的预约提醒提前天数（0~2）；缺失或非法回退 2（前 2 天）。 */
     public int clinicBookOffset(Long userId) {
         UserSetting s = userSettingMapper.selectOne(new LambdaQueryWrapper<UserSetting>()
                 .eq(UserSetting::getUserId, userId));
         Integer offset = s == null ? null : s.getClinicBookOffset();
-        return offset != null && offset >= 0 && offset <= 3 ? offset : DEFAULT_CLINIC_BOOK_OFFSET;
+        return offset != null && offset >= 0 && offset <= 2 ? offset : DEFAULT_CLINIC_BOOK_OFFSET;
     }
 
     // ───────────────────────────── 内部工具 ─────────────────────────────
@@ -234,6 +247,8 @@ public class NotificationSettingServiceImpl implements NotificationSettingServic
         }
         LocalTime clinicTime = s != null && s.getClinicRemindTime() != null
                 ? s.getClinicRemindTime() : DEFAULT_CLINIC_REMIND_TIME;
+        LocalTime bookTime = s != null && s.getClinicBookTime() != null
+                ? s.getClinicBookTime() : DEFAULT_CLINIC_BOOK_TIME;
         int visitOffset = s != null && isClinicOffsetValid(s.getClinicVisitOffset())
                 ? s.getClinicVisitOffset() : DEFAULT_CLINIC_VISIT_OFFSET;
         int bookOffset = s != null && isClinicOffsetValid(s.getClinicBookOffset())
@@ -243,7 +258,7 @@ public class NotificationSettingServiceImpl implements NotificationSettingServic
                 new DndSettingVO(dndOn, dndStart.format(HH_MM), dndEnd.format(HH_MM)),
                 wxSubscribeClient.isEnabled(), types,
                 alignerTime.format(HH_MM), alignerOffset, subscribeRemain,
-                clinicTime.format(HH_MM), visitOffset, bookOffset,
+                clinicTime.format(HH_MM), bookTime.format(HH_MM), visitOffset, bookOffset,
                 clinicVisitRemain, clinicBookRemain);
     }
 
@@ -420,9 +435,9 @@ public class NotificationSettingServiceImpl implements NotificationSettingServic
         return time;
     }
 
-    /** 复诊提醒提前天数合法区间：0~3。 */
+    /** 复诊提醒提前天数合法区间：0~2。 */
     private boolean isClinicOffsetValid(Integer offset) {
-        return offset != null && offset >= 0 && offset <= 3;
+        return offset != null && offset >= 0 && offset <= 2;
     }
 
     private WearReminderTypeEnum requireType(String code) {
