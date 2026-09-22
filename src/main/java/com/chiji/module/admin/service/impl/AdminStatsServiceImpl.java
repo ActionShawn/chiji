@@ -93,6 +93,7 @@ public class AdminStatsServiceImpl implements AdminStatsService {
         LocalDateTime endAt = today.plusDays(1).atStartOfDay();
 
         Map<String, Long> newUsers;
+        Map<String, Long> usageUsers;
         Map<String, Long> usageSec;
         Map<String, Long> apiCalls;
         Map<String, Long> newRecords;
@@ -104,6 +105,7 @@ public class AdminStatsServiceImpl implements AdminStatsService {
                 LocalDate first = today.minusDays("week".equals(effective) ? 6 : 29);
                 LocalDateTime startAt = first.atStartOfDay();
                 newUsers = toMapByDay(userMapper.countNewUsersByDay(startAt, endAt));
+                usageUsers = toMapByDay(usageSessionMapper.countDistinctUsersByDay(startAt, endAt));
                 usageSec = toMapByDay(usageSessionMapper.sumDurationSecByDay(startAt, endAt));
                 apiCalls = toMapByDay(apiMetricHourlyMapper.sumCntByDay(first, today));
                 newRecords = toMapByDay(timelineRecordMapper.countByDay(startAt, endAt));
@@ -116,17 +118,19 @@ public class AdminStatsServiceImpl implements AdminStatsService {
             case "all" -> {
                 LocalDateTime startAt = ALL_SINCE.atStartOfDay();
                 newUsers = toMapByLabel(userMapper.countNewUsersByMonth(startAt, endAt));
+                usageUsers = toMapByLabel(usageSessionMapper.countDistinctUsersByMonth(startAt, endAt));
                 usageSec = toMapByLabel(usageSessionMapper.sumDurationSecByMonth(startAt, endAt));
                 apiCalls = toMapByLabel(toLabelRows(apiMetricTrendByMonth()));
                 newRecords = toMapByLabel(timelineRecordMapper.countByMonth(startAt, endAt));
                 newImages = toMapByLabel(recordMediaMapper.countByMonth(startAt, endAt));
-                labels = monthLabels(earliestMonth(List.of(newUsers, usageSec, apiCalls, newRecords, newImages)),
+                labels = monthLabels(earliestMonth(List.of(newUsers, usageUsers, usageSec, apiCalls, newRecords, newImages)),
                         YearMonth.from(today));
             }
             default -> {
                 // 当天：24 小时点
                 LocalDateTime startAt = today.atStartOfDay();
                 newUsers = toMapByLabel(userMapper.countNewUsersByHour(startAt, endAt));
+                usageUsers = toMapByLabel(usageSessionMapper.countDistinctUsersByHour(startAt, endAt));
                 usageSec = toMapByLabel(usageSessionMapper.sumDurationSecByHour(startAt, endAt));
                 apiCalls = toMapByLabel(toLabelRows(apiMetricHourlyMapper.metricTrendByHour(today)));
                 newRecords = toMapByLabel(timelineRecordMapper.countByHour(startAt, endAt));
@@ -143,6 +147,7 @@ public class AdminStatsServiceImpl implements AdminStatsService {
             points.add(AdminStatsTrendVO.Point.builder()
                     .label(label)
                     .newUsers(newUsers.getOrDefault(label, 0L))
+                    .usageUsers(usageUsers.getOrDefault(label, 0L))
                     .usageSec(usageSec.getOrDefault(label, 0L))
                     .apiCalls(apiCalls.getOrDefault(label, 0L))
                     .newRecords(newRecords.getOrDefault(label, 0L))

@@ -37,6 +37,9 @@ public class AdminStatsTrendVO {
         /** 新增用户数 */
         private long newUsers;
 
+        /** 使用人数（区间内去重） */
+        private long usageUsers;
+
         /** 使用时长（秒） */
         private long usageSec;
 

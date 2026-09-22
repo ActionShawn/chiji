@@ -106,6 +106,32 @@ public interface UsageSessionMapper extends BaseMapper<UsageSession> {
                                               @Param("end") LocalDateTime end);
 
     /**
+     * 按小时使用用户数去重（管理端看板当日趋势）。
+     *
+     * @param start 起始时刻（含）
+     * @param end   结束时刻（不含）
+     * @return 每小时去重人数（label=两位小时「09」）
+     */
+    @Select("SELECT DATE_FORMAT(enter_at, '%H') AS label, COUNT(DISTINCT user_id) AS value "
+            + "FROM usage_session WHERE enter_at >= #{start} AND enter_at < #{end} "
+            + "GROUP BY label")
+    List<LabelValueRow> countDistinctUsersByHour(@Param("start") LocalDateTime start,
+                                                 @Param("end") LocalDateTime end);
+
+    /**
+     * 按月使用用户数去重（管理端看板全部趋势）。
+     *
+     * @param start 起始时刻（含）
+     * @param end   结束时刻（不含）
+     * @return 每月去重人数（label=「2026-09」）
+     */
+    @Select("SELECT DATE_FORMAT(enter_at, '%Y-%m') AS label, COUNT(DISTINCT user_id) AS value "
+            + "FROM usage_session WHERE enter_at >= #{start} AND enter_at < #{end} "
+            + "GROUP BY label")
+    List<LabelValueRow> countDistinctUsersByMonth(@Param("start") LocalDateTime start,
+                                                  @Param("end") LocalDateTime end);
+
+    /**
      * 区间内用户使用时长排行（管理端运营看板，时长倒序取前 N）。
      *
      * @param start 起始时刻（含）
