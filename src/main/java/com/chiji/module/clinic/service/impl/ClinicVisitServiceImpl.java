@@ -224,7 +224,7 @@ public class ClinicVisitServiceImpl implements ClinicVisitService {
     }
 
     @Override
-    public ClinicMonthVO monthView(Long userId, String month) {
+    public ClinicMonthVO monthView(Long userId, String month, Long stageId) {
         YearMonth ym;
         try {
             ym = month == null || month.isBlank()
@@ -239,14 +239,21 @@ public class ClinicVisitServiceImpl implements ClinicVisitService {
                 .le(ClinicVisit::getVisitDate, ym.atEndOfMonth())
                 .orderByAsc(ClinicVisit::getVisitDate)
                 .orderByAsc(ClinicVisit::getId));
-        // 预约窗口锚点（隐形=最终副计划结束日；无阶段/非最终副为 null，页面退化为纯手动模式）
+        // 预约窗口锚点与阶段预计完成日均按「首页当前选中阶段」计算（stageId 为空回退 ACTIVE 阶段）：
+        // 锚点=该阶段 ACTIVE 且佩戴最终副时的计划结束日（历史阶段无预约卡）；完成日=该阶段最后一副计划结束日
+        String treatmentType = currentTreatmentType(userId);
         LocalDate anchor = bookingStrategies.stream()
-                .filter(s -> s.supports(currentTreatmentType(userId)))
+                .filter(s -> s.supports(treatmentType))
                 .findFirst()
-                .map(s -> s.computeWindowAnchor(userId))
+                .map(s -> s.computeWindowAnchor(userId, stageId))
+                .orElse(null);
+        LocalDate stageEnd = bookingStrategies.stream()
+                .filter(s -> s.supports(treatmentType))
+                .findFirst()
+                .map(s -> s.computeStageExpectedEnd(userId, stageId))
                 .orElse(null);
         List<ClinicVisitVO> vos = visits.stream().map(v -> toVO(v, Collections.emptyList())).toList();
-        return new ClinicMonthVO(ym.format(MONTH_FMT), vos, anchor, anchor != null);
+        return new ClinicMonthVO(ym.format(MONTH_FMT), vos, anchor, anchor != null, stageEnd);
     }
 
     @Override

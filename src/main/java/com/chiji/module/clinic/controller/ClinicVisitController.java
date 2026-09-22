@@ -60,10 +60,11 @@ public class ClinicVisitController {
         return R.ok(visitService.complete(SecurityUtil.getCurrentUserId(), id, req));
     }
 
-    @Operation(summary = "月视图", description = "自绘月历数据源：本月日程/记录 + 预约窗口锚点（预计戴完日）")
+    @Operation(summary = "月视图", description = "自绘月历数据源：本月日程/记录 + 预约窗口锚点（预计戴完日）+ 阶段预计完成日；锚点按首页选中阶段计算")
     @GetMapping("/month")
-    public R<ClinicMonthVO> monthView(@RequestParam(required = false) String month) {
-        return R.ok(visitService.monthView(SecurityUtil.getCurrentUserId(), month));
+    public R<ClinicMonthVO> monthView(@RequestParam(required = false) String month,
+                                      @RequestParam(required = false) Long stageId) {
+        return R.ok(visitService.monthView(SecurityUtil.getCurrentUserId(), month, stageId));
     }
 
     @Operation(summary = "日视图", description = "当日日程/记录 + 当日花费")

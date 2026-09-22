@@ -46,16 +46,18 @@ public class ClearAlignerBookingRemindStrategy implements BookingRemindStrategy 
 
     @Override
     public LocalDate computeWindowAnchor(Long userId) {
+        return computeWindowAnchor(userId, null);
+    }
+
+    @Override
+    public LocalDate computeWindowAnchor(Long userId, Long stageId) {
         User user = userMapper.selectById(userId);
         if (user == null || !supports(user.getTreatmentType())) {
             return null;
         }
-        Stage stage = stageMapper.selectOne(new LambdaQueryWrapper<Stage>()
-                .eq(Stage::getUserId, userId)
-                .eq(Stage::getStatus, StageStatusEnum.ACTIVE.name())
-                .orderByDesc(Stage::getId)
-                .last("LIMIT 1"));
-        if (stage == null) {
+        Stage stage = resolveStage(userId, stageId);
+        // 仅 ACTIVE 阶段存在「预约窗口」：历史阶段已结束，不渲染预约卡
+        if (stage == null || !StageStatusEnum.ACTIVE.name().equals(stage.getStatus())) {
             return null;
         }
         Aligner active = alignerMapper.selectOne(new LambdaQueryWrapper<Aligner>()
@@ -72,6 +74,51 @@ public class ClearAlignerBookingRemindStrategy implements BookingRemindStrategy 
             return null;
         }
         return plannedEndDate(active);
+    }
+
+    @Override
+    public LocalDate computeStageExpectedEnd(Long userId) {
+        return computeStageExpectedEnd(userId, null);
+    }
+
+    @Override
+    public LocalDate computeStageExpectedEnd(Long userId, Long stageId) {
+        User user = userMapper.selectById(userId);
+        if (user == null || !supports(user.getTreatmentType())) {
+            return null;
+        }
+        Stage stage = resolveStage(userId, stageId);
+        if (stage == null) {
+            return null;
+        }
+        // 阶段最后一副（不限佩戴状态，FUTURE 副同样有计划结束日），与首页「预计完成日」同口径
+        Aligner last = alignerMapper.selectOne(new LambdaQueryWrapper<Aligner>()
+                .eq(Aligner::getStageId, stage.getId())
+                .orderByDesc(Aligner::getNum)
+                .orderByDesc(Aligner::getId)
+                .last("LIMIT 1"));
+        return last == null ? null : plannedEndDate(last);
+    }
+
+    /**
+     * 解析目标阶段：stageId 非空按 ID 查（校验归属该用户，防越权）；
+     * 为空回退用户当前 ACTIVE 阶段（服务端扫描等无选中语境的场景）。
+     */
+    private Stage resolveStage(Long userId, Long stageId) {
+        if (stageId != null) {
+            Stage stage = stageMapper.selectById(stageId);
+            return stage == null || !userId.equals(stage.getUserId()) ? null : stage;
+        }
+        return activeStage(userId);
+    }
+
+    /** 用户当前 ACTIVE 阶段（不存在返回 null）。 */
+    private Stage activeStage(Long userId) {
+        return stageMapper.selectOne(new LambdaQueryWrapper<Stage>()
+                .eq(Stage::getUserId, userId)
+                .eq(Stage::getStatus, StageStatusEnum.ACTIVE.name())
+                .orderByDesc(Stage::getId)
+                .last("LIMIT 1"));
     }
 
     /**

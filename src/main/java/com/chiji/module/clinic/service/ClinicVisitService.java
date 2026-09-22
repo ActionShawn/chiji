@@ -55,13 +55,14 @@ public interface ClinicVisitService {
     ClinicVisitVO complete(Long userId, Long id, VisitCompleteRequest req);
 
     /**
-     * 月视图（自绘月历数据源：本月日程/记录 + 预约窗口锚点）。
+     * 月视图（自绘月历数据源：本月日程/记录 + 预约窗口锚点 + 阶段预计完成日）。
      *
-     * @param userId 用户 ID
-     * @param month  月份 yyyy-MM
+     * @param userId  用户 ID
+     * @param month   月份 yyyy-MM
+     * @param stageId 首页当前选中阶段 ID（null 回退 ACTIVE 阶段；锚点/完成日均按该阶段计算）
      * @return 月视图
      */
-    ClinicMonthVO monthView(Long userId, String month);
+    ClinicMonthVO monthView(Long userId, String month, Long stageId);
 
     /**
      * 日视图（当日日程/记录 + 当日花费）。
