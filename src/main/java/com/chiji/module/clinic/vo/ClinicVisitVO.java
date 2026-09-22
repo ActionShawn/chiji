@@ -13,6 +13,7 @@ import java.util.List;
  * @param status           PLANNED / DONE
  * @param clinicName       诊所/医院名称
  * @param doctorName       医生姓名
+ * @param remark           备注（可空）
  * @param content          就诊内容摘要
  * @param nextVisitDate    下次复诊日期
  * @param stageId          关联阶段 ID
@@ -28,6 +29,7 @@ public record ClinicVisitVO(
         String status,
         String clinicName,
         String doctorName,
+        String remark,
         String content,
         LocalDate nextVisitDate,
         Long stageId,

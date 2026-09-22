@@ -95,6 +95,7 @@ public class ClinicVisitServiceImpl implements ClinicVisitService {
         visit.setStatus(ClinicVisitStatusEnum.PLANNED.name());
         visit.setClinicName(trimToNull(req.clinicName()));
         visit.setDoctorName(trimToNull(req.doctorName()));
+        visit.setRemark(trimToNull(req.remark()));
         visit.setRemindOffsetDays(req.remindOffsetDays());
         applyStageSnapshot(userId, visit);
         visitMapper.insert(visit);
@@ -116,6 +117,7 @@ public class ClinicVisitServiceImpl implements ClinicVisitService {
         visit.setVisitDate(req.visitDate());
         visit.setClinicName(trimToNull(req.clinicName()));
         visit.setDoctorName(trimToNull(req.doctorName()));
+        visit.setRemark(trimToNull(req.remark()));
         visit.setRemindOffsetDays(req.remindOffsetDays());
         visitMapper.updateById(visit);
         return toVO(visit, Collections.emptyList());
@@ -385,7 +387,7 @@ public class ClinicVisitServiceImpl implements ClinicVisitService {
     /** 实体 → VO（mediaList 由调用方按需组装）。 */
     private ClinicVisitVO toVO(ClinicVisit v, List<ClinicVisitVO.MediaVO> medias) {
         return new ClinicVisitVO(v.getId(), v.getVisitDate(), v.getStatus(),
-                v.getClinicName(), v.getDoctorName(), v.getContent(), v.getNextVisitDate(),
+                v.getClinicName(), v.getDoctorName(), v.getRemark(), v.getContent(), v.getNextVisitDate(),
                 v.getStageId(), v.getAlignerId(), v.getTimelineRecordId(), v.getRemindOffsetDays(),
                 medias);
     }

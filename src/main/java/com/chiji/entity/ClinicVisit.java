@@ -40,6 +40,9 @@ public class ClinicVisit extends BaseEntity {
     /** 医生姓名（可空） */
     private String doctorName;
 
+    /** 备注（可空，用户自由填写，如注意事项） */
+    private String remark;
+
     /** 就诊内容摘要（完成后补录） */
     private String content;
 
