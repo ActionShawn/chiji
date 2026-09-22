@@ -48,4 +48,29 @@ public class SubscriptionController {
         }
         return R.ok(new SubscribeQuotaVO(subscribeQuotaService.remain(userId, scene)));
     }
+
+    /**
+     * 上报小齿档案订阅结果（就诊提醒 / 预约提醒共用端点，scene 区分）。
+     * <p>
+     * accept 时对应场景额度 +1；reject 不做任何记录（下次窗口会重新弹授权）。
+     */
+    @Operation(summary = "上报小齿档案订阅结果", description = "scene=CLINIC_VISIT_REMIND/CLINIC_BOOK_REMIND；accept 时额度 +1")
+    @PostMapping("/clinic/record")
+    public R<SubscribeQuotaVO> recordClinic(@RequestBody SubscribeRecordRequest req) {
+        Long userId = SecurityUtil.getCurrentUserId();
+        String result = req == null || req.result() == null ? "" : req.result().trim().toLowerCase();
+        if (!RESULT_ACCEPT.equals(result) && !RESULT_REJECT.equals(result)) {
+            throw new BusinessException(ErrorCode.NOTIFICATION_PARAM_INVALID, "订阅结果不合法");
+        }
+        String scene = req.scene() == null ? "" : req.scene().trim();
+        WearReminderTypeEnum type = WearReminderTypeEnum.getByCode(scene);
+        if (type != WearReminderTypeEnum.CLINIC_VISIT_REMIND
+                && type != WearReminderTypeEnum.CLINIC_BOOK_REMIND) {
+            throw new BusinessException(ErrorCode.NOTIFICATION_PARAM_INVALID, "订阅场景不合法");
+        }
+        if (RESULT_ACCEPT.equals(result)) {
+            subscribeQuotaService.recordAccept(userId, scene);
+        }
+        return R.ok(new SubscribeQuotaVO(subscribeQuotaService.remain(userId, scene)));
+    }
 }

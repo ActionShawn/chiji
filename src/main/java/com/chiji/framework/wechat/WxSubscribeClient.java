@@ -75,16 +75,33 @@ public class WxSubscribeClient {
     }
 
     /**
-     * 订阅消息下发是否可用：开关开启且模板 ID 已配置。
+     * 订阅消息下发是否可用：开关开启且换副提醒模板 ID 已配置。
      *
      * @return 可用返回 true
      */
     public boolean isEnabled() {
+        return wechatProperties.getSubscribe() != null
+                && wechatProperties.getSubscribe().isAlignerChangeReady();
+    }
+
+    /**
+     * 就诊提醒（小齿档案）下发通道是否可用。
+     *
+     * @return 可用返回 true
+     */
+    public boolean isClinicVisitEnabled() {
         WechatProperties.Subscribe subscribe = wechatProperties.getSubscribe();
-        return subscribe != null
-                && subscribe.isEnabled()
-                && subscribe.getAlignerChangeTemplateId() != null
-                && !subscribe.getAlignerChangeTemplateId().isBlank();
+        return subscribe != null && subscribe.isClinicVisitReady();
+    }
+
+    /**
+     * 预约提醒（小齿档案）下发通道是否可用。
+     *
+     * @return 可用返回 true
+     */
+    public boolean isClinicBookEnabled() {
+        WechatProperties.Subscribe subscribe = wechatProperties.getSubscribe();
+        return subscribe != null && subscribe.isClinicBookReady();
     }
 
     /**
@@ -95,7 +112,8 @@ public class WxSubscribeClient {
      * @return 微信返回 errcode == 0（下发成功）返回 true；否则记录日志并返回 false
      */
     public boolean sendAlignerChangeMessage(String openid, Map<String, Object> data) {
-        WxSendResult result = trySendAlignerChangeMessage(openid, data);
+        WxSendResult result = trySend(openid, data,
+                wechatProperties.getSubscribe().getAlignerChangeTemplateId());
         return result.errcode() == null || result.errcode() == 0;
     }
 
@@ -110,8 +128,52 @@ public class WxSubscribeClient {
      * @return 下发结果；errcode == 0 表示成功
      */
     public WxSendResult trySendAlignerChangeMessage(String openid, Map<String, Object> data) {
+        return trySend(openid, data, wechatProperties.getSubscribe().getAlignerChangeTemplateId());
+    }
+
+    /**
+     * 下发就诊提醒订阅消息（小齿档案）。
+     *
+     * @param openid 用户 openid
+     * @param data   模板数据（须覆盖模板定义的全部关键词，否则微信返回 47003）
+     * @return 下发成功返回 true；失败记录日志并返回 false
+     */
+    public boolean sendClinicVisitMessage(String openid, Map<String, Object> data) {
+        WxSendResult result = trySend(openid, data,
+                wechatProperties.getSubscribe().getClinicVisitTemplateId());
+        return result.errcode() == null || result.errcode() == 0;
+    }
+
+    /**
+     * 下发预约提醒订阅消息（小齿档案）。
+     *
+     * @param openid 用户 openid
+     * @param data   模板数据（须覆盖模板定义的全部关键词，否则微信返回 47003）
+     * @return 下发成功返回 true；失败记录日志并返回 false
+     */
+    public boolean sendClinicBookMessage(String openid, Map<String, Object> data) {
+        WxSendResult result = trySend(openid, data,
+                wechatProperties.getSubscribe().getClinicBookTemplateId());
+        return result.errcode() == null || result.errcode() == 0;
+    }
+
+    /**
+     * 通用下发：按模板 ID 组装请求体发送（换副/就诊/预约三条通道共用的实际发送链路）。
+     * <p>
+     * 必须先序列化为 byte[] 再发：Spring 6.1+ 对对象 body 采用流式发送（chunked、无
+     * Content-Length），微信网关校验该头不过会直接返回 412 Precondition Failed [no body]。
+     *
+     * @param openid     用户 openid
+     * @param data       模板数据
+     * @param templateId 模板 ID（未配置时按本地异常返回，不发起请求）
+     * @return 下发结果；errcode == 0 表示成功
+     */
+    private WxSendResult trySend(String openid, Map<String, Object> data, String templateId) {
         if (openid == null || openid.isBlank()) {
             return new WxSendResult(-1, "openid 为空");
+        }
+        if (templateId == null || templateId.isBlank()) {
+            return new WxSendResult(-1, "模板 ID 未配置");
         }
         WechatProperties.Subscribe subscribe = wechatProperties.getSubscribe();
         String token;
@@ -127,7 +189,7 @@ public class WxSubscribeClient {
 
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("touser", openid);
-        body.put("template_id", subscribe.getAlignerChangeTemplateId());
+        body.put("template_id", templateId);
         body.put("page", subscribe.getPage());
         body.put("miniprogram_state", subscribe.getMiniprogramState());
         body.put("lang", "zh_CN");
@@ -143,8 +205,6 @@ public class WxSubscribeClient {
 
         WxSubscribeResponse response;
         try {
-            // 必须先序列化为 byte[] 再发：Spring 6.1+ 对对象 body 采用流式发送（chunked、无
-            // Content-Length），微信网关校验该头不过会直接返回 412 Precondition Failed [no body]
             byte[] payload = objectMapper.writeValueAsBytes(body);
             response = restClient.post()
                     .uri(uri)

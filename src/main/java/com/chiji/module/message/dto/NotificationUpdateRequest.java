@@ -20,6 +20,9 @@ import java.util.List;
  * @param types               逐类型开关（可选）
  * @param alignerRemindTime   换副提醒时间（可选，整点 {@code HH:00}）
  * @param alignerRemindOffset 换副提醒时机偏移（可选，-1/0/1）
+ * @param clinicRemindTime    复诊提醒时刻（可选，整点 {@code HH:00}；就诊/预约提醒共用）
+ * @param clinicVisitOffset   就诊提醒提前天数（可选，0~3，0=当天）
+ * @param clinicBookOffset    预约提醒提前天数（可选，0~3）
  */
 public record NotificationUpdateRequest(
         Boolean master,
@@ -29,7 +32,10 @@ public record NotificationUpdateRequest(
         String preset,
         List<TypeSwitchUpdate> types,
         String alignerRemindTime,
-        Integer alignerRemindOffset
+        Integer alignerRemindOffset,
+        String clinicRemindTime,
+        Integer clinicVisitOffset,
+        Integer clinicBookOffset
 ) {
 
     /**

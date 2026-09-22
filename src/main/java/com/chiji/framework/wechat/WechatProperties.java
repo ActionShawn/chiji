@@ -40,10 +40,35 @@ public class WechatProperties {
         /** 换副提醒模板 ID。 */
         private String alignerChangeTemplateId;
 
+        /** 就诊提醒模板 ID（小齿档案复诊日程到期提醒）。 */
+        private String clinicVisitTemplateId;
+
+        /** 预约提醒模板 ID（隐形最终副临近戴完提醒预约复诊）。 */
+        private String clinicBookTemplateId;
+
         /** 点击模板消息的跳转页。 */
         private String page = "pages/index/index";
 
         /** 跳转小程序类型：formal(正式版)/trial(体验版)/developer(开发版)。 */
         private String miniprogramState = "formal";
+
+        /** 换副提醒通道是否可用（开关开启且模板 ID 已配置）。 */
+        public boolean isAlignerChangeReady() {
+            return enabled && isNotBlank(alignerChangeTemplateId);
+        }
+
+        /** 就诊提醒通道是否可用。 */
+        public boolean isClinicVisitReady() {
+            return enabled && isNotBlank(clinicVisitTemplateId);
+        }
+
+        /** 预约提醒通道是否可用。 */
+        public boolean isClinicBookReady() {
+            return enabled && isNotBlank(clinicBookTemplateId);
+        }
+
+        private boolean isNotBlank(String v) {
+            return v != null && !v.isBlank();
+        }
     }
 }

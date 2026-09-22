@@ -52,6 +52,9 @@ public class NotificationSettingServiceImpl implements NotificationSettingServic
     private static final LocalTime DEFAULT_DND_END = LocalTime.of(8, 0);
     private static final LocalTime DEFAULT_ALIGNER_REMIND_TIME = LocalTime.of(7, 0);
     private static final int DEFAULT_ALIGNER_REMIND_OFFSET = 0;
+    private static final LocalTime DEFAULT_CLINIC_REMIND_TIME = LocalTime.of(7, 0);
+    private static final int DEFAULT_CLINIC_VISIT_OFFSET = 0;
+    private static final int DEFAULT_CLINIC_BOOK_OFFSET = 3;
 
     private final UserSettingMapper userSettingMapper;
     private final UserNotificationConfigMapper configMapper;
@@ -105,6 +108,21 @@ public class NotificationSettingServiceImpl implements NotificationSettingServic
                 throw new BusinessException(ErrorCode.NOTIFICATION_PARAM_INVALID, "换副提醒时机不合法");
             }
             s.setAlignerRemindOffset(req.alignerRemindOffset());
+        }
+        if (req.clinicRemindTime() != null) {
+            s.setClinicRemindTime(parseClinicRemindTime(req.clinicRemindTime()));
+        }
+        if (req.clinicVisitOffset() != null) {
+            if (!isClinicOffsetValid(req.clinicVisitOffset())) {
+                throw new BusinessException(ErrorCode.NOTIFICATION_PARAM_INVALID, "就诊提醒时机不合法");
+            }
+            s.setClinicVisitOffset(req.clinicVisitOffset());
+        }
+        if (req.clinicBookOffset() != null) {
+            if (!isClinicOffsetValid(req.clinicBookOffset())) {
+                throw new BusinessException(ErrorCode.NOTIFICATION_PARAM_INVALID, "预约提醒时机不合法");
+            }
+            s.setClinicBookOffset(req.clinicBookOffset());
         }
 
         // 2. 一键应用预设：覆盖 8 类开关明细
@@ -166,6 +184,31 @@ public class NotificationSettingServiceImpl implements NotificationSettingServic
         return WearTimes.now().getHour() == remindTime.getHour();
     }
 
+    @Override
+    public boolean isClinicRemindHour(Long userId) {
+        UserSetting s = userSettingMapper.selectOne(new LambdaQueryWrapper<UserSetting>()
+                .eq(UserSetting::getUserId, userId));
+        LocalTime remindTime = s != null && s.getClinicRemindTime() != null
+                ? s.getClinicRemindTime() : DEFAULT_CLINIC_REMIND_TIME;
+        return WearTimes.now().getHour() == remindTime.getHour();
+    }
+
+    /** 用户配置的就诊提醒提前天数（0~3）；缺失或非法回退 0（当天）。 */
+    public int clinicVisitOffset(Long userId) {
+        UserSetting s = userSettingMapper.selectOne(new LambdaQueryWrapper<UserSetting>()
+                .eq(UserSetting::getUserId, userId));
+        Integer offset = s == null ? null : s.getClinicVisitOffset();
+        return offset != null && offset >= 0 && offset <= 3 ? offset : DEFAULT_CLINIC_VISIT_OFFSET;
+    }
+
+    /** 用户配置的预约提醒提前天数（0~3）；缺失或非法回退 3（前 3 天）。 */
+    public int clinicBookOffset(Long userId) {
+        UserSetting s = userSettingMapper.selectOne(new LambdaQueryWrapper<UserSetting>()
+                .eq(UserSetting::getUserId, userId));
+        Integer offset = s == null ? null : s.getClinicBookOffset();
+        return offset != null && offset >= 0 && offset <= 3 ? offset : DEFAULT_CLINIC_BOOK_OFFSET;
+    }
+
     // ───────────────────────────── 内部工具 ─────────────────────────────
 
     /** 行缺失时按默认值装配整读 VO（不写库）。 */
@@ -181,17 +224,27 @@ public class NotificationSettingServiceImpl implements NotificationSettingServic
         int alignerOffset = s != null && isOffsetValid(s.getAlignerRemindOffset())
                 ? s.getAlignerRemindOffset() : DEFAULT_ALIGNER_REMIND_OFFSET;
         int subscribeRemain = subscribeQuotaService.remain(userId, WearReminderTypeEnum.ALIGNER_CHANGE.getCode());
+        int clinicVisitRemain = subscribeQuotaService.remain(userId, WearReminderTypeEnum.CLINIC_VISIT_REMIND.getCode());
+        int clinicBookRemain = subscribeQuotaService.remain(userId, WearReminderTypeEnum.CLINIC_BOOK_REMIND.getCode());
 
         List<TypeSwitchVO> types = new ArrayList<>();
         for (WearReminderTypeEnum t : WearReminderTypeEnum.values()) {
             boolean on = enabled.getOrDefault(t.getCode(), t.isDefaultOn());
             types.add(new TypeSwitchVO(t.getCode(), t.getDesc(), t.getGroupName(), on));
         }
+        LocalTime clinicTime = s != null && s.getClinicRemindTime() != null
+                ? s.getClinicRemindTime() : DEFAULT_CLINIC_REMIND_TIME;
+        int visitOffset = s != null && isClinicOffsetValid(s.getClinicVisitOffset())
+                ? s.getClinicVisitOffset() : DEFAULT_CLINIC_VISIT_OFFSET;
+        int bookOffset = s != null && isClinicOffsetValid(s.getClinicBookOffset())
+                ? s.getClinicBookOffset() : DEFAULT_CLINIC_BOOK_OFFSET;
         return new NotificationSettingsVO(
                 master, popup, badge, preset,
                 new DndSettingVO(dndOn, dndStart.format(HH_MM), dndEnd.format(HH_MM)),
                 wxSubscribeClient.isEnabled(), types,
-                alignerTime.format(HH_MM), alignerOffset, subscribeRemain);
+                alignerTime.format(HH_MM), alignerOffset, subscribeRemain,
+                clinicTime.format(HH_MM), visitOffset, bookOffset,
+                clinicVisitRemain, clinicBookRemain);
     }
 
     /** 读取已落行的开关明细；未落行不在 map 中（由呈现层按默认值兜底）。 */
@@ -348,6 +401,28 @@ public class NotificationSettingServiceImpl implements NotificationSettingServic
     /** 换副提醒时机偏移合法区间：-1 前一天 / 0 当天 / 1 后一天。 */
     private boolean isOffsetValid(Integer offset) {
         return offset != null && offset >= -1 && offset <= 1;
+    }
+
+    /** 解析复诊提醒时刻为整点；非整点或格式非法抛参数异常。 */
+    private LocalTime parseClinicRemindTime(String hhmm) {
+        if (hhmm == null || hhmm.isBlank()) {
+            throw new BusinessException(ErrorCode.NOTIFICATION_PARAM_INVALID, "复诊提醒时间格式应为 HH:00");
+        }
+        LocalTime time;
+        try {
+            time = LocalTime.parse(hhmm.trim(), HH_MM);
+        } catch (RuntimeException e) {
+            throw new BusinessException(ErrorCode.NOTIFICATION_PARAM_INVALID, "复诊提醒时间格式应为 HH:00");
+        }
+        if (time.getMinute() != 0) {
+            throw new BusinessException(ErrorCode.NOTIFICATION_PARAM_INVALID, "复诊提醒时间仅支持整点");
+        }
+        return time;
+    }
+
+    /** 复诊提醒提前天数合法区间：0~3。 */
+    private boolean isClinicOffsetValid(Integer offset) {
+        return offset != null && offset >= 0 && offset <= 3;
     }
 
     private WearReminderTypeEnum requireType(String code) {

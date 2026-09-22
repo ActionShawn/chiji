@@ -138,12 +138,12 @@ CREATE TABLE IF NOT EXISTS `compare_milestone` (
 CREATE TABLE IF NOT EXISTS `message` (
     `id`            BIGINT       NOT NULL COMMENT '主键（雪花算法生成）',
     `user_id`       BIGINT       NOT NULL COMMENT '接收用户 ID',
-    `category`      VARCHAR(24)  NOT NULL COMMENT '分类：MessageCategoryEnum.name()，RECORD_REMINDER/STAGE_UPDATE/FELLOW_TRAVELER/SYSTEM_CARE/WEAR(佩戴提醒)',
+    `category`      VARCHAR(24)  NOT NULL COMMENT '分类：MessageCategoryEnum.name()，提醒类落 WEAR(佩戴提醒)/PROGRESS(佩戴进度)/CLINIC(复诊提醒)/SYSTEM_CARE(问候)，存量兼容 RECORD_REMINDER/STAGE_UPDATE/FELLOW_TRAVELER',
     `reminder_type` VARCHAR(32)  DEFAULT NULL COMMENT '提醒类型：WearReminderTypeEnum.name()（WEAR_* 佩戴组 / ALIGNER_CHANGE 等进度组），存量消息为 null',
     `scene_date`    DATE         DEFAULT NULL COMMENT '业务场景日期（去重维度：同用户同类型同日期至多一条提醒）',
     `priority`      TINYINT(1)   NOT NULL DEFAULT 1 COMMENT '优先级：0 低 / 1 普通 / 2 高（供未来排序）',
-    `push_status`   VARCHAR(16)  NOT NULL DEFAULT 'NONE' COMMENT '订阅消息推送状态：NONE(未推送)/PUSHED(已推送)，当前无订阅通道恒为 NONE',
-    `pushed_at`     DATETIME     DEFAULT NULL COMMENT '推送时间（当前无订阅通道，恒为 null）',
+    `push_status`   VARCHAR(16)  NOT NULL DEFAULT 'NONE' COMMENT '订阅消息推送状态：NONE(未推送)/PUSHED(已推送)，仅换副提醒等已开通订阅通道的类型会回写 PUSHED',
+    `pushed_at`     DATETIME     DEFAULT NULL COMMENT '推送时间（订阅消息下发成功时回写）',
     `title`         VARCHAR(128) NOT NULL COMMENT '标题',
     `body`          TEXT         NOT NULL COMMENT '正文',
     `read`          TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '是否已读（对应前端 status unread/read）',
@@ -173,12 +173,66 @@ CREATE TABLE IF NOT EXISTS `user_setting` (
     `dnd_end`           TIME        NOT NULL DEFAULT '08:00:00' COMMENT '勿扰结束时间',
     `aligner_remind_time`   TIME    NOT NULL DEFAULT '07:00:00' COMMENT '换副提醒时间（Asia/Shanghai，仅整点，默认早 7 点，可改）',
     `aligner_remind_offset` TINYINT NOT NULL DEFAULT 0 COMMENT '换副提醒时机偏移：-1 到期前一天 / 0 到期当天 / 1 到期后一天',
+    `clinic_remind_time`    TIME    NOT NULL DEFAULT '07:00:00' COMMENT '复诊提醒时刻（Asia/Shanghai，仅整点，默认早 7 点；就诊提醒与预约提醒共用）',
+    `clinic_visit_offset`   TINYINT NOT NULL DEFAULT 0 COMMENT '就诊提醒提前天数：0 当天 / 1~3 提前 N 天（默认当天）',
+    `clinic_book_offset`    TINYINT NOT NULL DEFAULT 3 COMMENT '预约提醒提前天数：0~3 天（默认前 3 天，仅隐形最终副生效）',
     `created_at`        DATETIME    NOT NULL COMMENT '创建时间',
     `updated_at`        DATETIME    NOT NULL COMMENT '更新时间',
     `deleted`           TINYINT(1)  NOT NULL DEFAULT 0 COMMENT '逻辑删除：0 正常 / 1 已删除',
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_user_setting_user` (`user_id`) COMMENT '每用户至多一条设置'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户设置表';
+
+-- 复诊档案：已确认日程与就诊记录（同表，status 区分）
+CREATE TABLE IF NOT EXISTS `clinic_visit` (
+    `id`                 BIGINT       NOT NULL COMMENT '主键（雪花算法生成）',
+    `user_id`            BIGINT       NOT NULL COMMENT '所属用户 ID',
+    `visit_date`         DATE         NOT NULL COMMENT '复诊日期',
+    `status`             VARCHAR(16)  NOT NULL DEFAULT 'PLANNED' COMMENT '状态：ClinicVisitStatusEnum.name()，PLANNED(待复诊)/DONE(已完成)',
+    `clinic_name`        VARCHAR(64)  DEFAULT NULL COMMENT '诊所/医院名称（可空，预填上次值）',
+    `doctor_name`        VARCHAR(64)  DEFAULT NULL COMMENT '医生姓名（可空）',
+    `content`            VARCHAR(512) DEFAULT NULL COMMENT '就诊内容摘要（完成后补录）',
+    `next_visit_date`    DATE         DEFAULT NULL COMMENT '医生约定的下次复诊日期（填写即自动生成下一条 PLANNED）',
+    `stage_id`           BIGINT       DEFAULT NULL COMMENT '创建时关联阶段 ID（可空，仅展示用）',
+    `aligner_id`         BIGINT       DEFAULT NULL COMMENT '创建时关联牙套副 ID（可空，仅隐形有值，仅展示用）',
+    `timeline_record_id` BIGINT       DEFAULT NULL COMMENT '完成时同步生成的时光轴记录 ID（可空）',
+    `remind_offset_days` INT          DEFAULT NULL COMMENT '就诊提醒提前天数（0~3，null=用用户默认配置）',
+    `created_at`         DATETIME     NOT NULL COMMENT '创建时间',
+    `updated_at`         DATETIME     NOT NULL COMMENT '更新时间',
+    `deleted`            TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '逻辑删除：0 正常 / 1 已删除',
+    PRIMARY KEY (`id`),
+    KEY `idx_clinic_visit_user_date` (`user_id`, `visit_date`) COMMENT '按用户取复诊日程/记录'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='复诊档案表';
+
+-- 矫正花费流水
+CREATE TABLE IF NOT EXISTS `clinic_expense` (
+    `id`           BIGINT        NOT NULL COMMENT '主键（雪花算法生成）',
+    `user_id`      BIGINT        NOT NULL COMMENT '所属用户 ID',
+    `category_id`  BIGINT        NOT NULL COMMENT '分类 ID（clinic_expense_category）',
+    `visit_id`     BIGINT        DEFAULT NULL COMMENT '关联复诊记录 ID（可空；复诊费一键生成时回填）',
+    `expense_date` DATE          NOT NULL COMMENT '花费日期',
+    `amount`       DECIMAL(10,2) NOT NULL COMMENT '金额（元，两位小数）',
+    `note`         VARCHAR(255)  DEFAULT NULL COMMENT '备注（可空）',
+    `created_at`   DATETIME      NOT NULL COMMENT '创建时间',
+    `updated_at`   DATETIME      NOT NULL COMMENT '更新时间',
+    `deleted`      TINYINT(1)    NOT NULL DEFAULT 0 COMMENT '逻辑删除：0 正常 / 1 已删除',
+    PRIMARY KEY (`id`),
+    KEY `idx_clinic_expense_user_date` (`user_id`, `expense_date`) COMMENT '按用户取花费流水'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='矫正花费流水表';
+
+-- 花费分类（user_id=0 为系统内置：牙套费/复诊费/保持器/洁牙/其他，照 tag 表模式）
+CREATE TABLE IF NOT EXISTS `clinic_expense_category` (
+    `id`         BIGINT      NOT NULL COMMENT '主键（雪花算法生成）',
+    `user_id`    BIGINT      NOT NULL COMMENT '所属用户 ID；0 = 系统内置预设',
+    `name`       VARCHAR(32) NOT NULL COMMENT '分类名（同一用户下唯一）',
+    `sort_order` INT         NOT NULL DEFAULT 0 COMMENT '排序权重，越小越靠前',
+    `created_at` DATETIME    NOT NULL COMMENT '创建时间',
+    `updated_at` DATETIME    NOT NULL COMMENT '更新时间',
+    `deleted`    TINYINT(1)  NOT NULL DEFAULT 0 COMMENT '逻辑删除：0 正常 / 1 已删除',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_clinic_cat_user_name` (`user_id`, `name`) COMMENT '同一用户（含系统预设）下分类名唯一',
+    KEY `idx_clinic_cat_user` (`user_id`, `sort_order`) COMMENT '按用户取分类列表'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='矫正花费分类表';
 
 -- 首页常用工具配置（每用户一行；工具 key 有序列表，默认顺序由客户端字典承载）
 CREATE TABLE IF NOT EXISTS `user_tool_config` (

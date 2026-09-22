@@ -108,6 +108,8 @@ chiji:
     subscribe:
       enabled: ${WECHAT_SUBSCRIBE_ENABLED:true}
       aligner-change-template-id: ${WECHAT_TMPL_ALIGNER_CHANGE:8OJWmrJwUswD20NH4QIl69nrx7IEb6TOstBzMr6XYZU}
+      clinic-visit-template-id: ${WECHAT_TMPL_CLINIC_VISIT:}
+      clinic-book-template-id: ${WECHAT_TMPL_CLINIC_BOOK:}
       page: ${WECHAT_SUBSCRIBE_PAGE:pages/index/index}
       miniprogram-state: ${WECHAT_MINIPROGRAM_STATE:formal}
   # 阿里云 OSS
