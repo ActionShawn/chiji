@@ -48,6 +48,12 @@ public class RecordMedia {
     /** 展示排序，越小越靠前 */
     private Integer sortOrder;
 
+    /** 拍摄视角类别：FRONT_CLOSED/FRONT_SMILE/SIDE/ARCH_UPPER/ARCH_LOWER/NORMAL，历史数据与视频为 null */
+    private String viewType;
+
+    /** 自定义标签，逗号分隔（最多3个、单个≤8字），前端打标，历史数据与视频为 null */
+    private String tags;
+
     /** 创建时间，插入时自动填充 */
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;

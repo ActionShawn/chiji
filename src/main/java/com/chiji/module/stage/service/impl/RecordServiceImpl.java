@@ -374,6 +374,8 @@ public class RecordServiceImpl implements RecordService {
             // 图片强制 duration 为 null，对齐 record_media.duration 语义
             media.setDuration("IMAGE".equals(m.type()) ? null : m.duration());
             media.setSortOrder(m.sortOrder() != null ? m.sortOrder() : i);
+            media.setViewType(m.viewType());
+            media.setTags(m.tags());
             recordMediaMapper.insert(media);
             result.add(MediaItemVO.builder()
                     .id(media.getId())
@@ -381,6 +383,8 @@ public class RecordServiceImpl implements RecordService {
                     .url(media.getUrl())
                     .duration(media.getDuration())
                     .sortOrder(media.getSortOrder())
+                    .viewType(media.getViewType())
+                    .tags(media.getTags())
                     .build());
         }
         return result;
@@ -404,6 +408,8 @@ public class RecordServiceImpl implements RecordService {
                         .url(m.getUrl())
                         .duration(m.getDuration())
                         .sortOrder(m.getSortOrder())
+                        .viewType(m.getViewType())
+                        .tags(m.getTags())
                         .build())
                 .toList();
     }
