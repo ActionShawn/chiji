@@ -375,7 +375,6 @@ public class RecordServiceImpl implements RecordService {
             media.setDuration("IMAGE".equals(m.type()) ? null : m.duration());
             media.setSortOrder(m.sortOrder() != null ? m.sortOrder() : i);
             media.setViewType(m.viewType());
-            media.setTags(m.tags());
             recordMediaMapper.insert(media);
             result.add(MediaItemVO.builder()
                     .id(media.getId())
@@ -384,7 +383,6 @@ public class RecordServiceImpl implements RecordService {
                     .duration(media.getDuration())
                     .sortOrder(media.getSortOrder())
                     .viewType(media.getViewType())
-                    .tags(media.getTags())
                     .build());
         }
         return result;
@@ -409,7 +407,6 @@ public class RecordServiceImpl implements RecordService {
                         .duration(m.getDuration())
                         .sortOrder(m.getSortOrder())
                         .viewType(m.getViewType())
-                        .tags(m.getTags())
                         .build())
                 .toList();
     }

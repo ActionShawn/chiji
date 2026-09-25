@@ -20,8 +20,6 @@ public record MediaItem(
         /** 展示排序，越小越靠前（可空，缺省按数组下标） */
         Integer sortOrder,
         /** 拍摄视角类别：FRONT_CLOSED 正面闭嘴 / FRONT_SMILE 正面露齿笑 / SIDE 侧面 / ARCH_UPPER 上牙套 / ARCH_LOWER 下牙套 / NORMAL 普通；历史数据与视频为 null */
-        String viewType,
-        /** 自定义标签，逗号分隔（最多3个、单个≤8字），可空 */
-        String tags
+        String viewType
 ) {
 }

@@ -25,6 +25,4 @@ public class MediaItemVO {
     private final Integer sortOrder;
     /** 拍摄视角类别：FRONT_CLOSED/FRONT_SMILE/SIDE/ARCH_UPPER/ARCH_LOWER/NORMAL，历史数据与视频为 null */
     private final String viewType;
-    /** 自定义标签，逗号分隔（最多3个、单个≤8字），历史数据与视频为 null */
-    private final String tags;
 }

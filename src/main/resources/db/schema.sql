@@ -91,7 +91,6 @@ CREATE TABLE IF NOT EXISTS `record_media` (
     `caption`    VARCHAR(255) DEFAULT NULL COMMENT '说明文字（可空）',
     `sort_order` INT          NOT NULL DEFAULT 0 COMMENT '展示排序，越小越靠前',
     `view_type`  VARCHAR(16)  DEFAULT NULL COMMENT '拍摄视角类别：FRONT_CLOSED/FRONT_SMILE/SIDE/ARCH_UPPER/ARCH_LOWER/NORMAL，历史数据与视频为 NULL',
-    `tags`       VARCHAR(128) DEFAULT NULL COMMENT '自定义标签，逗号分隔（最多3个、单个≤8字），历史数据与视频为 NULL',
     `created_at` DATETIME     NOT NULL COMMENT '创建时间',
     `updated_at` DATETIME     NOT NULL COMMENT '更新时间',
     `deleted`    TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '逻辑删除：0 正常 / 1 已删除',
