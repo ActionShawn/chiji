@@ -12,8 +12,8 @@ import com.chiji.module.wear.support.WearTimes;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
@@ -45,7 +45,6 @@ import java.util.Map;
  */
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class TakeoffTimeoutTaskHandler implements DelayTaskHandler {
 
     /** 任务类型 / 订阅场景码（与 {@link SubscribeQuotaService#SCENE_TAKEOFF_TIMEOUT} 同名） */
@@ -55,6 +54,25 @@ public class TakeoffTimeoutTaskHandler implements DelayTaskHandler {
     private final SubscribeQuotaService subscribeQuotaService;
     private final TakeoffNotifyService takeoffNotifyService;
     private final ObjectMapper objectMapper;
+
+    /**
+     * 显式构造器（取代 Lombok）：{@code wearService} 必须 {@link Lazy} 注入。
+     * <p>
+     * 依赖环：HandlerRegistry → 本 handler → WearService(WearServiceImpl) → DelayTaskService
+     * → HandlerRegistry。构造器注入的环 Spring 无法解析，会抛 BeanCurrentlyInCreationException
+     * 导致应用启动失败（8080 不监听、云托管探针 connection refused）。
+     * 本 handler 仅在 execute 期使用 WearService，故注入代理、把解析推迟到首次调用，
+     * 既打破环，又保留 HandlerRegistry 启动期的 fail-fast 校验。
+     */
+    public TakeoffTimeoutTaskHandler(@Lazy WearService wearService,
+                                     SubscribeQuotaService subscribeQuotaService,
+                                     TakeoffNotifyService takeoffNotifyService,
+                                     ObjectMapper objectMapper) {
+        this.wearService = wearService;
+        this.subscribeQuotaService = subscribeQuotaService;
+        this.takeoffNotifyService = takeoffNotifyService;
+        this.objectMapper = objectMapper;
+    }
 
     @Override
     public String type() {
