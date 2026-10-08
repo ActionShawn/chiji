@@ -1,6 +1,7 @@
-package com.chiji.common.config;
+// D:\Java Work Place\personal-develop\teeth-trace\chiji\src\main\java\com\chiji\module\track\config\MetricsWebConfig.java
+package com.chiji.module.track.config;
 
-import com.chiji.framework.metrics.ApiMetricsInterceptor;
+import com.chiji.module.track.interceptor.ApiMetricsInterceptor;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
@@ -9,8 +10,8 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 /**
  * 接口监控拦截器注册。
  * <p>
- * {@link ApiMetricsInterceptor} 注册在最外层（order=-100，先于 SaTokenConfig 注册的
- * Sa-Token 拦截器），登录校验耗时计入接口耗时。
+ * {@link ApiMetricsInterceptor} 注册在最外层（order=-100，先于 Sa-Token 拦截器），
+ * 登录校验耗时计入接口耗时。
  */
 @Configuration
 @RequiredArgsConstructor

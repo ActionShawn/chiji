@@ -1,6 +1,9 @@
-package com.chiji.framework.metrics;
+// D:\Java Work Place\personal-develop\teeth-trace\chiji\src\main\java\com\chiji\module\track\interceptor\ApiMetricsInterceptor.java
+package com.chiji.module.track.interceptor;
 
 import cn.dev33.satoken.stp.StpUtil;
+import com.chiji.framework.metrics.ApiMetricsCollector;
+import com.chiji.framework.metrics.MetricsProperties;
 import com.chiji.module.track.service.SlowApiLogService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -20,6 +23,9 @@ import java.util.concurrent.TimeUnit;
  * <p>
  * 注册顺序在最外层（order=-100，先于 Sa-Token），登录校验耗时计入接口耗时（合理口径）。
  * {@code chiji.metrics.enabled=false} 时零开销跳过。
+ * <p>
+ * 位于 track 模块：慢请求明细落库依赖 track 的 service，属采集层一体职责
+ * （ArchUnit 约束 framework 层不得依赖 module，2026-10-07 自 framework.metrics 迁入）。
  */
 @Component
 @RequiredArgsConstructor

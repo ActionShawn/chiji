@@ -1,5 +1,5 @@
-// D:\Java Work Place\personal-develop\teeth-trace\server\src\main\java\com\chiji\common\config\SaTokenConfig.java
-package com.chiji.common.config;
+// D:\Java Work Place\personal-develop\teeth-trace\chiji\src\main\java\com\chiji\module\auth\config\SaTokenConfig.java
+package com.chiji.module.auth.config;
 
 import cn.dev33.satoken.interceptor.SaInterceptor;
 import cn.dev33.satoken.router.SaHttpMethod;
@@ -19,6 +19,9 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
  * 拦截所有请求，仅对 {@code /api/**} 下的接口执行登录校验；
  * 白名单放行登录、基础自检与 AI 自检接口，并放行 CORS 预检请求（OPTIONS）。
  * {@code /api/admin/**} 在登录校验之上叠加管理员角色校验（user.role = ADMIN）。
+ * <p>
+ * 位于 auth 模块：管理员角色校验依赖 {@link UserService}，属模块内依赖
+ * （ArchUnit 约束 common 层不得依赖 module，2026-10-07 自 common.config 迁入）。
  */
 @Configuration
 @RequiredArgsConstructor
