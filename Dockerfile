@@ -13,30 +13,32 @@ RUN mvn -s /app/settings.xml -B dependency:go-offline || true
 COPY src ./src
 RUN mvn -s /app/settings.xml -B clean package -DskipTests
 
-# ============================ 运行阶段：JDK 21 JRE ============================
-# 官方 openjdk 镜像已弃用，选用 eclipse-temurin（Ubuntu 22.04 基础，稳定兼容）
-FROM eclipse-temurin:21-jre-jammy
+# 按 Spring Boot 分层规范拆包：依赖层内容稳定，可被后续构建复用镜像层，
+# 显著减少每次部署向 TCR 推送、节点拉取的体积（总大小不变，但加快发布与冷启动）
+RUN java -Djarmode=layertools -jar target/chiji-server-1.0.0.jar extract
+
+# ============================ 运行阶段：JDK 21 JRE（Alpine 精简基础镜像）============================
+# 由 Ubuntu(jammy) 换为 Alpine：剔除整套 Ubuntu 用户态，镜像大幅瘦身（原 819MB），
+# 缩短云托管冷启动的镜像拉取耗时，避免健康检查窗口内 8080 尚未监听而报 connection refused
+FROM eclipse-temurin:21-jre-alpine
 
 # 业务依赖 Asia/Shanghai 时区（记录创建时间、日志时间戳）
 ENV TZ=Asia/Shanghai
-RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
-
-# 安装/更新系统 CA 证书，并同步为 JVM 信任库
-# （精简 JRE 镜像缺省证书不完整，会导致调用微信 api.weixin.qq.com 等 HTTPS 接口时 PKIX 证书校验失败）
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates ca-certificates-java && \
-    update-ca-certificates -f && \
-    rm -rf /var/lib/apt/lists/* && \
-    cp -f /etc/ssl/certs/java/cacerts "$JAVA_HOME/lib/security/cacerts"
+# Alpine 基础镜像已自带完整 JVM 信任库（cacerts），此处仅补齐 tzdata / ca-certificates 系统层，
+# 相比原先 apt 安装 ca-certificates-java 再回写 cacerts 更轻、构建更快
+RUN apk add --no-cache tzdata ca-certificates
 
 # 运行时工作目录（日志默认落盘 ./logs）
 WORKDIR /app
 
-# 将构建产物 jar 拷贝到运行时目录
-COPY --from=build /app/target/chiji-server-1.0.0.jar /app/app.jar
+# 分层拷贝：依赖层（变化少）在前，应用层（每次构建变化）在后，最大化镜像层缓存复用
+COPY --from=build /app/dependencies/ ./
+COPY --from=build /app/spring-boot-loader/ ./
+COPY --from=build /app/snapshot-dependencies/ ./
+COPY --from=build /app/application/ ./
 
 # 暴露端口：此处端口必须与「服务设置」中填写的容器端口一致（8080）
 EXPOSE 8080
 
-# 启动命令（只保留一行 CMD，多行只有最后一行生效）
-CMD ["java", "-Xmx512m", "-Xms256m", "-XX:+HeapDumpOnOutOfMemoryError", "-jar", "/app/app.jar"]
+# 启动命令（只保留一行，多行只有最后一行生效）；JarLauncher 由 spring-boot-loader 层提供
+ENTRYPOINT ["java", "-Xmx512m", "-Xms256m", "-XX:+HeapDumpOnOutOfMemoryError", "org.springframework.boot.loader.launch.JarLauncher"]
