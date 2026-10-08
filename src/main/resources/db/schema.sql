@@ -165,6 +165,7 @@ CREATE TABLE IF NOT EXISTS `user_setting` (
     `enable_cloud_sync` TINYINT(1)  NOT NULL DEFAULT 0 COMMENT '是否启用云同步',
     `reminder_time`     TIME        DEFAULT NULL COMMENT '每日提醒时间（可选，与「记录提醒」消息呼应）',
     `goal_sec`          INT         NOT NULL DEFAULT 72000 COMMENT '每日佩戴目标（秒，默认 20h=72000；可调 18.0–22.0h，步进 0.5h）',
+    `goal_updated_at`   DATETIME    DEFAULT NULL COMMENT '每日佩戴目标最近设置/修改时刻（NULL=未记录或迁移前旧数据；复诊小结未达标基准日优先取此列日期，NULL 回退 updated_at 近似）',
     `notif_master`      TINYINT(1)  NOT NULL DEFAULT 1 COMMENT '通知总开关：0 关闭（不再生成/归档提醒消息）/ 1 开启',
     `notif_popup`       TINYINT(1)  NOT NULL DEFAULT 1 COMMENT '弹窗提醒开关：0 关闭（提醒仅信箱可见）',
     `notif_badge`       TINYINT(1)  NOT NULL DEFAULT 1 COMMENT '信箱红点/角标开关：0 关闭',
@@ -178,6 +179,7 @@ CREATE TABLE IF NOT EXISTS `user_setting` (
     `clinic_book_time`      TIME    NOT NULL DEFAULT '07:00:00' COMMENT '预约提醒时刻（Asia/Shanghai，仅整点，默认早 7 点，独立于就诊提醒时刻）',
     `clinic_visit_offset`   TINYINT NOT NULL DEFAULT 0 COMMENT '就诊提醒提前天数：0 当天 / 1~2 提前 N 天（默认当天）',
     `clinic_book_offset`    TINYINT NOT NULL DEFAULT 2 COMMENT '预约提醒提前天数：0~2 天（默认前 2 天，仅隐形最终副生效）',
+    `takeoff_remind_mode`   VARCHAR(16) NOT NULL DEFAULT 'HALF_HOUR' COMMENT '摘下超时提醒方式：HALF_HOUR(固定半小时)/ONE_HOUR(固定一小时)/SMART(智能提醒)，默认 HALF_HOUR',
     `created_at`        DATETIME    NOT NULL COMMENT '创建时间',
     `updated_at`        DATETIME    NOT NULL COMMENT '更新时间',
     `deleted`           TINYINT(1)  NOT NULL DEFAULT 0 COMMENT '逻辑删除：0 正常 / 1 已删除',
@@ -348,14 +350,15 @@ CREATE TABLE IF NOT EXISTS `user_notification_config` (
     KEY `idx_notif_cfg_user` (`user_id`) COMMENT '按用户取通知配置'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户通知类型开关表';
 
--- 一次性订阅消息额度（本地记账）
+-- 一次性订阅消息额度（本地记账；记账模型按场景分流，见 com.chiji.module.message.service.SubscribeQuotaService）
 CREATE TABLE IF NOT EXISTS `user_subscribe_quota` (
     `id`             BIGINT      NOT NULL COMMENT '主键（雪花算法生成）',
     `user_id`        BIGINT      NOT NULL COMMENT '所属用户 ID',
-    `scene`          VARCHAR(32) NOT NULL COMMENT '订阅场景：ALIGNER_CHANGE（换副提醒）',
-    `remain`         INT         NOT NULL DEFAULT 0 COMMENT '本地记账剩余可下发次数（accept +1，发送成功 -1）',
-    `accepted_total` INT         NOT NULL DEFAULT 0 COMMENT '累计授权次数（accept 次数，仅统计用）',
+    `scene`          VARCHAR(32) NOT NULL COMMENT '订阅场景：ALIGNER_CHANGE（换副提醒）/CLINIC_VISIT_REMIND/CLINIC_BOOK_REMIND（小齿档案）/TAKEOFF_TIMEOUT（摘下超时提醒）',
+    `remain`         INT         NOT NULL DEFAULT 0 COMMENT '剩余可下发次数：常驻场景为生命周期累计（accept +1，发送成功 -1，失败不扣）；TAKEOFF_TIMEOUT 为当日剩余（授权 +1 记入当日、下发尝试即扣且失败不回补、跨日随 quota_date 惰性清零）',
+    `accepted_total` INT         NOT NULL DEFAULT 0 COMMENT '累计授权次数：常驻场景为生命周期累计（仅统计用）；TAKEOFF_TIMEOUT 为当日累计授权数（跨日随 quota_date 惰性清零，授权调起判断口径）',
     `last_accept_at` DATETIME    DEFAULT NULL COMMENT '最近一次授权时间',
+    `quota_date`     DATE        DEFAULT NULL COMMENT '额度记账日期（Asia/Shanghai，惰性每日清零标记；NULL=需重置。仅 TAKEOFF_TIMEOUT 场景使用，其余场景恒为 NULL）',
     `created_at`     DATETIME    NOT NULL COMMENT '创建时间',
     `updated_at`     DATETIME    NOT NULL COMMENT '更新时间',
     `deleted`        TINYINT(1)  NOT NULL DEFAULT 0 COMMENT '逻辑删除：0 正常 / 1 已删除',
