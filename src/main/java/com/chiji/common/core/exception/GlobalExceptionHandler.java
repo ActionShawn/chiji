@@ -14,6 +14,7 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
@@ -129,6 +130,23 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(MaxUploadSizeExceededException.class)
     public R<Void> handleMaxUploadSize(MaxUploadSizeExceededException e) {
         return R.fail(ErrorCode.BAD_REQUEST.getCode(), "上传文件过大，请控制在允许范围内");
+    }
+
+    /**
+     * 路径变量/请求参数类型不匹配。
+     * <p>
+     * 典型场景：前端 stageId 为空拼出 {@code /api/stages//aligners}，网关折叠连续斜杠后
+     * URL 变为 {@code /api/stages/aligners}，{@code {id}} 占位符捕获到 {@code "aligners"}
+     * 无法转 {@code Long}。属请求方构造了不合法 URL，非服务端故障，降级为 400 且不记 ERROR 日志。
+     *
+     * @param e 类型不匹配异常
+     * @return 400 响应
+     */
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public R<Void> handleTypeMismatch(MethodArgumentTypeMismatchException e) {
+        log.warn("请求参数类型不匹配, traceId={}, name={}, value={}",
+                MDC.get("traceId"), e.getName(), e.getValue());
+        return R.fail(ErrorCode.BAD_REQUEST);
     }
 
     /**
