@@ -140,6 +140,22 @@ public interface DelayTaskMapper extends BaseMapper<DelayTask> {
     int completeFailure(@Param("id") Long id, @Param("leaseUntil") LocalDateTime leaseUntil,
                         @Param("nextRetry") int nextRetry, @Param("lastError") String lastError);
 
+    /**
+     * 执行中业务性改期（handler 抛 {@link com.chiji.module.delay.handler.DelayTaskRescheduleException}）：
+     * RUNNING 行原子置回 PENDING 并改写 execute_at（非终态、不消耗重试）；
+     * {@code payload} 非空时一并改写任务 payload（如跨零点重排把到点下发文案换为跨零点可见性版）。
+     * 带 lease_until 乐观围栏：租约已被回收/重投时影响 0 行，本次改期作废（防与重执行双写）。
+     *
+     * @return 影响行数：1 改期成功；0 本次执行已过期
+     */
+    @Update("<script>UPDATE delay_task SET status = 'PENDING', execute_at = #{newExecuteAt}, "
+            + "lease_until = NULL, last_error = #{reason} "
+            + "<if test='payload != null'>, payload = #{payload}</if> "
+            + "WHERE id = #{id} AND status = 'RUNNING' AND lease_until = #{leaseUntil}</script>")
+    int rescheduleRunning(@Param("id") Long id, @Param("leaseUntil") LocalDateTime leaseUntil,
+                          @Param("newExecuteAt") LocalDateTime newExecuteAt,
+                          @Param("reason") String reason, @Param("payload") String payload);
+
     // ─────────────── 运维动作（管理端） ───────────────
 
     /**

@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.chiji.entity.DelayTask;
 import com.chiji.module.delay.config.DelayQueueProperties;
 import com.chiji.module.delay.handler.DelayTaskHandler;
+import com.chiji.module.delay.handler.DelayTaskRescheduleException;
 import com.chiji.module.delay.handler.DelayTaskSkipException;
 import com.chiji.module.delay.handler.HandlerRegistry;
 import com.chiji.module.delay.mapper.DelayTaskMapper;
@@ -172,6 +173,19 @@ public class DelayTaskServiceImpl implements DelayTaskService {
             completeSuccess(task, null);
         } catch (DelayTaskSkipException skip) {
             completeSuccess(task, skip.getMessage());
+        } catch (DelayTaskRescheduleException reschedule) {
+            // 业务性改期：RUNNING 置回 PENDING 并改写 execute_at（非终态、不耗重试）；
+            // 携带 newPayload 时一并改写任务 payload（如跨零点重排把到点下发文案换为跨零点可见性版）；
+            // 租约围栏保证与租约回收重投互斥，影响 0 行即本次改期作废
+            int updated = delayTaskMapper.rescheduleRunning(task.getId(), task.getLeaseUntil(),
+                    reschedule.getNewExecuteAt(), truncate("RESCHEDULED: " + reschedule.getReason()),
+                    reschedule.getNewPayload());
+            if (updated > 0) {
+                log.info("延迟任务业务性改期: bizKey={}, newExecuteAt={}, reason={}",
+                        task.getBizKey(), reschedule.getNewExecuteAt(), reschedule.getReason());
+            } else {
+                log.info("延迟任务改期未命中（租约已被回收/重投），本次改期作废: bizKey={}", task.getBizKey());
+            }
         } catch (Exception e) {
             retryOrFail(task, e);
         }
