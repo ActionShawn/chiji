@@ -7,6 +7,7 @@ import com.chiji.entity.UserSetting;
 import com.chiji.entity.WearDailySummary;
 import com.chiji.entity.WearSession;
 import com.chiji.entity.WearSessionEditLog;
+import com.chiji.enums.StageStatusEnum;
 import com.chiji.enums.WearReminderTypeEnum;
 import com.chiji.enums.WearSourceEnum;
 import com.chiji.module.message.service.ReminderNotifyService;
@@ -20,8 +21,10 @@ import com.chiji.module.wear.mapper.WearSessionMapper;
 import com.chiji.module.wear.mapper.WearUserSettingMapper;
 import com.chiji.module.wear.service.WearService;
 import com.chiji.module.wear.service.WearSettleService;
+import com.chiji.module.wear.support.TakeoffTimeoutSpec;
 import com.chiji.module.wear.support.WearDayMath;
 import com.chiji.module.wear.support.WearTimes;
+import com.chiji.module.wear.vo.ConsultSummaryVO;
 import com.chiji.module.wear.vo.GoalVO;
 import com.chiji.module.wear.vo.TodaySessionVO;
 import com.chiji.module.wear.vo.TodayWearVO;
@@ -79,6 +82,8 @@ public class WearServiceImpl implements WearService {
     private final WearSettleService wearSettleService;
     private final AlignerService alignerService;
     private final ReminderNotifyService reminderNotifyService;
+    private final com.chiji.module.delay.service.DelayTaskService delayTaskService;
+    private final com.chiji.module.message.service.NotificationSettingService notificationSettingService;
 
     // ── 工作台 ──────────────────────────────────────────────
 
@@ -100,6 +105,8 @@ public class WearServiceImpl implements WearService {
                 s.setAlignerId(worn == null ? null : worn.getId());
                 wearSessionMapper.insert(s);
                 log.info("佩戴打卡开, userId={}, sessionId={}, mode={}, alignerId={}", userId, s.getId(), mode, s.getAlignerId());
+                // BE-5：戴回取消摘下超时任务（幂等；取消落在本事务内，与投递同事务保证一致性）
+                cancelTakeoffTimeout(userId);
             }
             // 已有佩戴中会话则幂等返回（不重复开段）
         } else if ("WEAR_OFF".equals(action)) {
@@ -109,10 +116,281 @@ public class WearServiceImpl implements WearService {
             open.setEndedAt(WearTimes.now());
             wearSessionMapper.updateById(open);
             log.info("佩戴打卡关, userId={}, sessionId={}", userId, open.getId());
+            // BE-4：摘下超时提醒投递（前置：类型开关开启；开关/方式不满足则不投递，不阻断打卡）
+            submitTakeoffTimeout(userId, open.getId());
         } else {
             throw new BusinessException(ErrorCode.WEAR_PARAM_INVALID, "打卡动作应为 WEAR_ON / WEAR_OFF");
         }
         return readToday(userId);
+    }
+
+    // ── 摘下超时提醒（BE-4 投递 / BE-5 取消 / BE-6 围栏支撑） ─────────────
+
+    /**
+     * 摘下超时提醒投递（punch WEAR_OFF 事务内调用）。
+     * <p>
+     * 前置不满足则静默不投递：类型开关（总开关 + 摘下超时提醒类型开关）关闭。开关开启后按
+     * {@code remindMode} 以摘下时刻快照一次性计算 executeAt（智能模式用今日目标与今日已佩戴，
+     * 已佩戴时长与统计侧共用 {@link #sessionsOverlapping} + {@link WearDayMath#distribute} 同一套
+     * 跨零点切分口径）。「摘下即达上限」的 executeAt = now+1s，走调度泵正常路径，
+     * 不在本事务内同步下发。
+     */
+    private void submitTakeoffTimeout(Long userId, Long sessionId) {
+        if (!notificationSettingService.isReminderAllowed(userId, WearReminderTypeEnum.TAKEOFF_TIMEOUT)) {
+            log.info("摘下超时提醒未开启，跳过投递, userId={}, sessionId={}", userId, sessionId);
+            return;
+        }
+        String remindMode = notificationSettingService.takeoffRemindMode(userId);
+        LocalDateTime takeoffAt = WearTimes.now();
+        int goalSec = goalSec(userId);
+        long wornSec = wornSecToday(userId);
+        boolean immediate = TakeoffTimeoutSpec.MODE_SMART.equals(remindMode)
+                && TakeoffTimeoutSpec.isSmartImmediate(takeoffAt, goalSec, wornSec);
+        LocalDateTime executeAt = TakeoffTimeoutSpec.calcExecuteAt(remindMode, takeoffAt, goalSec, wornSec);
+        delayTaskService.submit(TakeoffTimeoutSpec.TASK_TYPE, TakeoffTimeoutSpec.bizKey(sessionId), executeAt,
+                "摘下超时提醒", TakeoffTimeoutSpec.buildPayload(userId, sessionId, remindMode,
+                        takeoffAt, goalSec, wornSec, immediate));
+        log.info("摘下超时提醒已投递, userId={}, sessionId={}, remindMode={}, executeAt={}",
+                userId, sessionId, remindMode, executeAt);
+    }
+
+    /**
+     * 戴回取消摘下超时任务（punch WEAR_ON 事务内调用，幂等）。
+     * <p>
+     * 业务键按「最近一条已收口会话」定位——即最近一次摘下动作投递的任务；无摘下记录时
+     * 取消空键无效但不报错。
+     */
+    private void cancelTakeoffTimeout(Long userId) {
+        Long closedId = latestClosedSessionId(userId);
+        if (closedId != null) {
+            delayTaskService.cancel(TakeoffTimeoutSpec.bizKey(closedId));
+            log.info("戴回取消摘下超时任务, userId={}, sessionId={}", userId, closedId);
+        }
+    }
+
+    /** 摘下时刻的今日已佩戴时长（秒）：与统计侧共用同一会话查询与跨零点切分口径。 */
+    private long wornSecToday(Long userId) {
+        LocalDateTime now = WearTimes.now();
+        LocalDate today = now.toLocalDate();
+        List<WearSession> sessions = sessionsOverlapping(userId, WearTimes.startOf(today), now);
+        return Math.max(0, WearDayMath.dayOrZero(WearDayMath.distribute(sessions, today, today, now), today).wear());
+    }
+
+    @Override
+    public boolean isTakeoffSessionOpen(Long userId, Long sessionId) {
+        if (userId == null || sessionId == null) {
+            return false;
+        }
+        WearSession closed = wearSessionMapper.selectById(sessionId);
+        if (closed == null || !userId.equals(closed.getUserId()) || closed.getEndedAt() == null) {
+            return false;
+        }
+        // 用户已戴回（存在佩戴中会话）→ 摘下被打断
+        Long openCount = wearSessionMapper.selectCount(new LambdaQueryWrapper<WearSession>()
+                .eq(WearSession::getUserId, userId)
+                .isNull(WearSession::getEndedAt));
+        return openCount == null || openCount == 0;
+    }
+
+    @Override
+    public Long latestClosedSessionId(Long userId) {
+        WearSession last = wearSessionMapper.selectOne(new LambdaQueryWrapper<WearSession>()
+                .eq(WearSession::getUserId, userId)
+                .isNotNull(WearSession::getEndedAt)
+                .orderByDesc(WearSession::getEndedAt)
+                .last("LIMIT 1"));
+        return last == null ? null : last.getId();
+    }
+
+    @Override
+    public int currentGoalSec(Long userId) {
+        return goalSec(userId);
+    }
+
+    @Override
+    public void cancelLatestTakeoffTimeout(Long userId) {
+        cancelTakeoffTimeout(userId);
+    }
+
+    @Override
+    public ConsultSummaryVO consultSummary(Long userId, String period, Long stageId) {
+        String p = period == null ? "" : period.trim().toUpperCase();
+        if (!"ALIGNER".equals(p) && !"STAGE".equals(p) && !"LAST30".equals(p)) {
+            throw new BusinessException(ErrorCode.WEAR_PARAM_INVALID, "统计周期应为 ALIGNER / STAGE / LAST30");
+        }
+        LocalDateTime now = WearTimes.now();
+        LocalDate today = now.toLocalDate();
+        com.chiji.entity.Aligner active = alignerService.findActiveAligner(userId, null);
+
+        // 1. 周期解析：阶段 + 目标副。BE-8 契约：
+        //    ALIGNER 有进行中副取当前副，无则回落「本阶段最后一副全程」；阶段不可解析（如阶段已
+        //    全部结束且未传 stageId）再回落用户最近一副，避免把有完整历史的用户误判为「从未创建阶段」；
+        //    STAGE 按 resolveStage 既有语义解析阶段（stageId 空回退 ACTIVE 阶段）；
+        //    LAST30 副取「当前副或最近一副」（周期与阶段无关，stage 字段恒 null）。
+        com.chiji.entity.Stage stage = null;
+        com.chiji.entity.Aligner target = null;
+        if ("STAGE".equals(p)) {
+            stage = alignerService.resolveStage(userId, stageId);
+            if (stage != null) {
+                boolean activeInStage = active != null && stage.getId().equals(active.getStageId());
+                target = activeInStage ? active : alignerService.findLastAlignerOfStage(stage.getId());
+            }
+        } else if ("ALIGNER".equals(p)) {
+            target = active;
+            if (target != null) {
+                stage = target.getStageId() != null
+                        ? alignerService.resolveStage(userId, target.getStageId()) : null;
+            }
+            if (target == null) {
+                stage = alignerService.resolveStage(userId, stageId);
+                target = stage != null ? alignerService.findLastAlignerOfStage(stage.getId()) : null;
+                if (target == null && stage == null) {
+                    target = alignerService.findLatestAlignerOfUser(userId);
+                    stage = target != null && target.getStageId() != null
+                            ? alignerService.resolveStage(userId, target.getStageId()) : null;
+                }
+            }
+        } else {
+            target = active != null ? active : alignerService.findLatestAlignerOfUser(userId);
+        }
+
+        if (stage == null && target == null) {
+            // 从未创建阶段（或 stageId 非本人且无任何副）：全空 NO_STAGE
+            return new ConsultSummaryVO(p, ConsultSummaryVO.STATE_NO_STAGE, true,
+                    null, null, 0, null, 0, 0, 0, List.of(), false, null);
+        }
+
+        // 2. 周期起止：起点 = 副/阶段开始日（缺失回退今天，未来排期截断到今天）；
+        //    终点真实判定：进行中 / 含今日为 null；已结束阶段收口至阶段结束日
+        //    （阶段无独立结束日列，由阶段内最后一副结束日派生，不混入后续阶段会话）
+        LocalDate from;
+        if ("ALIGNER".equals(p)) {
+            from = target != null && target.getStartDate() != null ? target.getStartDate() : today;
+        } else if ("STAGE".equals(p)) {
+            from = stage.getStartDate() != null ? stage.getStartDate()
+                    : (target != null && target.getStartDate() != null ? target.getStartDate() : today);
+        } else {
+            from = today.minusDays(29);
+        }
+        if (from.isAfter(today)) {
+            from = today;
+        }
+        LocalDate rawEnd = null;
+        if ("STAGE".equals(p)) {
+            if (!StageStatusEnum.ACTIVE.getCode().equals(stage.getStatus()) && target != null) {
+                rawEnd = target.getEndDate();
+            }
+        } else if ("ALIGNER".equals(p) && target != null) {
+            rawEnd = target.getEndDate();
+        }
+        boolean inProgress = rawEnd == null || !rawEnd.isBefore(today);
+        // 统计窗口收口：终点越过今天按今天截断（未来排期日不产生空评判日）
+        LocalDate statEnd = rawEnd == null || rawEnd.isAfter(today) ? today : rawEnd;
+        if (statEnd.isBefore(from)) {
+            statEnd = from;
+        }
+        LocalDate stageEnd = stage != null && !StageStatusEnum.ACTIVE.getCode().equals(stage.getStatus())
+                ? rawEnd : null;
+
+        // 3. 会话查询 + 切分：与今日工作台/统计侧共用同一套跨零点口径（sessionsOverlapping + distribute）
+        List<WearSession> sessions = sessionsOverlapping(userId, WearTimes.startOf(from), now);
+        if (sessions.isEmpty()) {
+            // 有阶段/副但所选周期内无任何打卡：态C 结构化空标记（阶段与副进度照常返回）
+            return stageNoRecord(p, stage, stageEnd, target, inProgress);
+        }
+
+        // 4. 逐日归并：记录天数直出 + 未达标判定 + 汇总
+        int goal = goalSec(userId);
+        Map<LocalDate, WearDayMath.DaySecs> daily = WearDayMath.distribute(sessions, from, statEnd, now);
+        LocalDate goalSince = goalSinceDate(userId);
+        long total = 0;
+        int recordDays = 0;
+        int underCount = 0;
+        List<ConsultSummaryVO.UnderDay> underDays = new ArrayList<>();
+        for (Map.Entry<LocalDate, WearDayMath.DaySecs> e : daily.entrySet()) {
+            long wear = Math.max(0, e.getValue().wear());
+            total += wear;
+            if (wear > 0) {
+                recordDays++;
+            }
+            // 无基准不评判：目标最近设置/修改日之前的日子不计入未达标（中途改目标不追溯）
+            if (e.getKey().isBefore(goalSince)) {
+                continue;
+            }
+            if (wear < goal) {
+                underCount++;
+                underDays.add(new ConsultSummaryVO.UnderDay(e.getKey().toString(), wear, goal));
+            }
+        }
+        if (recordDays == 0) {
+            // 会话全部落在统计窗口之外（如已结束阶段之后开启的新阶段会话）：态C
+            return stageNoRecord(p, stage, stageEnd, target, inProgress);
+        }
+        long avg = total / recordDays;
+        return new ConsultSummaryVO(p, ConsultSummaryVO.STATE_DATA, false,
+                from.toString(), inProgress ? null : rawEnd.toString(), recordDays,
+                stageInfoOf(p, stage, stageEnd), total, avg, underCount, underDays,
+                inProgress, progressOf(target));
+    }
+
+    /** 态C（有阶段但所选周期内零打卡）：日期与统计置空，阶段与副进度照常返回。 */
+    private ConsultSummaryVO stageNoRecord(String p, com.chiji.entity.Stage stage, LocalDate stageEnd,
+                                           com.chiji.entity.Aligner target, boolean inProgress) {
+        return new ConsultSummaryVO(p, ConsultSummaryVO.STATE_STAGE_NO_RECORD, true,
+                null, null, 0, stageInfoOf(p, stage, stageEnd), 0, 0, 0, List.of(),
+                inProgress, progressOf(target));
+    }
+
+    /** 阶段信息（LAST30 档周期与阶段无关，恒 null）。 */
+    private ConsultSummaryVO.StageInfo stageInfoOf(String p, com.chiji.entity.Stage stage, LocalDate endDate) {
+        if (stage == null || "LAST30".equals(p)) {
+            return null;
+        }
+        return new ConsultSummaryVO.StageInfo(stage.getId(), stage.getName(),
+                stage.getStartDate() == null ? null : stage.getStartDate().toString(),
+                endDate == null ? null : endDate.toString());
+    }
+
+    /**
+     * 目标副进度（ALIGNER=当前副/本阶段最后一副；STAGE=阶段内当前副或最后一副；LAST30=当前副或最近一副）。
+     * <p>
+     * wornDays 保持既有口径：自本副开始日起至今自然日数含今日（与阶段进度既有展示一致，
+     * 已收口副不按结束日截断）；与顶层 recordDays（周期内有佩戴记录的天数）不同名不混用。
+     */
+    private ConsultSummaryVO.AlignerProgress progressOf(com.chiji.entity.Aligner target) {
+        if (target == null) {
+            return null;
+        }
+        LocalDate today = WearTimes.now().toLocalDate();
+        int wornDays = target.getStartDate() != null
+                ? (int) Math.max(1, java.time.temporal.ChronoUnit.DAYS.between(target.getStartDate(), today) + 1)
+                : (target.getCurrentDay() != null ? target.getCurrentDay() : 1);
+        return new ConsultSummaryVO.AlignerProgress(
+                target.getId(), target.getStageId(),
+                target.getNum() == null ? 0 : target.getNum(),
+                alignerService.countAligners(target.getStageId()),
+                wornDays,
+                alignerService.alignerPlannedDays(target.getId()),
+                target.getStartDate() == null ? null : target.getStartDate().toString(),
+                target.getEndDate() == null ? null : target.getEndDate().toString());
+    }
+
+    /**
+     * 目标基准日（未达标评判起点）。PRD 2026-10-08 边界 2 拍板：优先取 {@code goal_updated_at}
+     * （目标最近设置/修改日，按目标生效日精确评判）；存量行/未记录时该列为 NULL，
+     * <b>宽松回退 {@code updated_at} 近似</b>（旧口径：整行最近更新日，可能因其他设置项保存而
+     * 偏晚 → 基准日偏晚 → 少评判，宽松方向可接受，见 PRD 边界 2）；均无记录按 MIN（全部纳入评判）。
+     */
+    private LocalDate goalSinceDate(Long userId) {
+        UserSetting s = wearUserSettingMapper.selectOne(new LambdaQueryWrapper<UserSetting>()
+                .eq(UserSetting::getUserId, userId));
+        if (s == null) {
+            return LocalDate.MIN;
+        }
+        if (s.getGoalUpdatedAt() != null) {
+            return s.getGoalUpdatedAt().toLocalDate();
+        }
+        return s.getUpdatedAt() == null ? LocalDate.MIN : s.getUpdatedAt().toLocalDate();
     }
 
     @Override
@@ -260,7 +538,13 @@ public class WearServiceImpl implements WearService {
             throw new BusinessException(ErrorCode.WEAR_GOAL_OUT_OF_RANGE, "目标需按 0.5 小时步进");
         }
         UserSetting setting = ensureSettingRow(userId);
+        // PRD 2026-10-08 边界 2 拍板：goal_updated_at 记录目标设置/修改时刻，作为复诊小结
+        // 未达标评判基准日的精确依据；仅目标值变化时刷新（值未变不重置基准），其余设置项保存不动它
+        boolean goalChanged = setting.getGoalSec() == null || !setting.getGoalSec().equals(sec);
         setting.setGoalSec(sec);
+        if (goalChanged) {
+            setting.setGoalUpdatedAt(WearTimes.now());
+        }
         wearUserSettingMapper.updateById(setting);
         log.info("佩戴目标更新, userId={}, goalHours={}", userId, goalHours);
         return toGoalVO(sec);

@@ -24,6 +24,8 @@ import java.util.List;
  * @param clinicBookTime      预约提醒时间（可选，整点 {@code HH:00}，独立于就诊提醒时间）
  * @param clinicVisitOffset   就诊提醒提前天数（可选，0~2，0=当天）
  * @param clinicBookOffset    预约提醒提前天数（可选，0~2）
+ * @param takeoffRemindMode   摘下超时提醒方式（可选，HALF_HOUR/ONE_HOUR/SMART；
+ *                            仅「摘下超时提醒」类型开关开启时生效）
  */
 public record NotificationUpdateRequest(
         Boolean master,
@@ -37,7 +39,8 @@ public record NotificationUpdateRequest(
         String clinicRemindTime,
         String clinicBookTime,
         Integer clinicVisitOffset,
-        Integer clinicBookOffset
+        Integer clinicBookOffset,
+        String takeoffRemindMode
 ) {
 
     /**

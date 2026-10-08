@@ -21,6 +21,8 @@ import java.util.List;
  * @param clinicBookOffset    预约提醒提前天数：0~2（缺省 2，仅隐形最终副生效）
  * @param clinicVisitRemain   就诊提醒订阅剩余可下发次数
  * @param clinicBookRemain    预约提醒订阅剩余可下发次数
+ * @param takeoffRemindMode   摘下超时提醒方式：HALF_HOUR/ONE_HOUR/SMART（缺省 HALF_HOUR）
+ * @param takeoffRemain       摘下超时提醒当日剩余提醒次数（当日剩余可下发额度，PRD「今日剩余提醒次数」）
  */
 public record NotificationSettingsVO(
         Boolean master,
@@ -38,6 +40,8 @@ public record NotificationSettingsVO(
         Integer clinicVisitOffset,
         Integer clinicBookOffset,
         Integer clinicVisitRemain,
-        Integer clinicBookRemain
+        Integer clinicBookRemain,
+        String takeoffRemindMode,
+        Integer takeoffRemain
 ) {
 }

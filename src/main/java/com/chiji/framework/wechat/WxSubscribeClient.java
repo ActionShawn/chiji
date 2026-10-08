@@ -158,6 +158,27 @@ public class WxSubscribeClient {
     }
 
     /**
+     * 下发摘下超时提醒订阅消息（佩戴体验迭代新增通道，模板与换副严格隔离）。
+     * <p>
+     * 模板字段约定：thing1=「牙套摘下超时提醒」（固定）、thing4=按提醒方式的最终文案（≤20 字符）、
+     * time6=摘下时刻（{@code yyyy-MM-dd HH:mm}，填摘下时刻非下发时刻）。
+     *
+     * @param openid 用户 openid
+     * @param data   模板数据（须覆盖模板定义的全部关键词，否则微信返回 47003）
+     * @return 下发成功返回 true；失败记录日志并返回 false
+     */
+    public boolean sendTakeoffTimeoutMessage(String openid, Map<String, Object> data) {
+        WxSendResult result = trySend(openid, data,
+                wechatProperties.getSubscribe().getTakeoffTimeoutTemplateId());
+        return result.errcode() == null || result.errcode() == 0;
+    }
+
+    /** 摘下超时提醒通道是否可用（总开关开启且模板 ID 已配置）。 */
+    public boolean isTakeoffTimeoutEnabled() {
+        return wechatProperties.getSubscribe().isTakeoffTimeoutReady();
+    }
+
+    /**
      * 通用下发：按模板 ID 组装请求体发送（换副/就诊/预约三条通道共用的实际发送链路）。
      * <p>
      * 必须先序列化为 byte[] 再发：Spring 6.1+ 对对象 body 采用流式发送（chunked、无

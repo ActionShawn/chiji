@@ -13,6 +13,7 @@ import com.chiji.enums.AlignerStateEnum;
 import com.chiji.enums.StageStatusEnum;
 import com.chiji.enums.WearSourceEnum;
 import com.chiji.module.message.service.ProgressReminderService;
+import com.chiji.module.delay.service.DelayTaskService;
 import com.chiji.module.stage.dto.AlignerTimeUpdateRequest;
 import com.chiji.module.stage.dto.RevertAlignerRequest;
 import com.chiji.module.stage.mapper.AlignerMapper;
@@ -23,6 +24,7 @@ import com.chiji.module.stage.service.assembler.AlignerNodeAssembler;
 import com.chiji.module.stage.support.StageModeSupport;
 import com.chiji.module.stage.vo.AlignerNodeVO;
 import com.chiji.module.wear.mapper.WearSessionMapper;
+import com.chiji.module.wear.support.TakeoffTimeoutSpec;
 import com.chiji.module.wear.support.WearTimes;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -76,6 +78,7 @@ public class AlignerServiceImpl implements AlignerService {
     private final ProgressReminderService progressReminderService;
     private final TimelineRecordMapper timelineRecordMapper;
     private final WearSessionMapper wearSessionMapper;
+    private final DelayTaskService delayTaskService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -355,11 +358,29 @@ public class AlignerServiceImpl implements AlignerService {
                     userId, stage.getId(), current.getNum(), e);
         }
 
+        // BE-5：换副/结束阶段事务内取消摘下超时任务（幂等）。
+        // 置于 splitOpenSessionToNext 之后：佩戴中换副场景旧会话刚被收口，此时按
+        // 「最近收口会话」定位才命中；摘下中换副 / 结束最后一副场景同样覆盖。
+        cancelLatestTakeoffTimeout(userId);
+
         // 6. 返回更新后的节点列表
         List<Aligner> all = alignerMapper.selectList(new LambdaQueryWrapper<Aligner>()
                 .eq(Aligner::getStageId, current.getStageId())
                 .orderByAsc(Aligner::getNum));
         return alignerNodeAssembler.toNodeList(all);
+    }
+
+    /** 取消最近一次摘下投递的超时任务（幂等；查询口径与 WearServiceImpl#latestClosedSessionId 一致）。 */
+    private void cancelLatestTakeoffTimeout(Long userId) {
+        WearSession last = wearSessionMapper.selectOne(new LambdaQueryWrapper<WearSession>()
+                .eq(WearSession::getUserId, userId)
+                .isNotNull(WearSession::getEndedAt)
+                .orderByDesc(WearSession::getEndedAt)
+                .last("LIMIT 1"));
+        if (last != null) {
+            delayTaskService.cancel(TakeoffTimeoutSpec.bizKey(last.getId()));
+            log.info("换副取消摘下超时任务, userId={}, sessionId={}", userId, last.getId());
+        }
     }
 
     @Override
@@ -552,6 +573,91 @@ public class AlignerServiceImpl implements AlignerService {
                 .eq(Aligner::getStageId, activeStage.getId())
                 .eq(Aligner::getState, AlignerStateEnum.ACTIVE.getCode())
                 .last("LIMIT 1"));
+    }
+
+    @Override
+    public Stage resolveStage(Long userId, Long stageId) {
+        if (userId == null) {
+            return null;
+        }
+        if (stageId != null) {
+            Stage stage = stageMapper.selectById(stageId);
+            return stage != null && userId.equals(stage.getUserId()) ? stage : null;
+        }
+        // stageId 为空回退 ACTIVE 阶段（语义与月历接口一致）
+        return stageMapper.selectOne(new LambdaQueryWrapper<Stage>()
+                .eq(Stage::getUserId, userId)
+                .eq(Stage::getStatus, StageStatusEnum.ACTIVE.getCode())
+                .last("LIMIT 1"));
+    }
+
+    @Override
+    public int countAligners(Long stageId) {
+        if (stageId == null) {
+            return 0;
+        }
+        Long count = alignerMapper.selectCount(new LambdaQueryWrapper<Aligner>()
+                .eq(Aligner::getStageId, stageId));
+        return count == null ? 0 : count.intValue();
+    }
+
+    @Override
+    public Aligner findLastAlignerOfStage(Long stageId) {
+        if (stageId == null) {
+            return null;
+        }
+        // 副序号阶段内从 1 递增，最后一副即 num 最大者（排期可被手动调整，按序号取最稳）
+        return alignerMapper.selectOne(new LambdaQueryWrapper<Aligner>()
+                .eq(Aligner::getStageId, stageId)
+                .orderByDesc(Aligner::getNum)
+                .last("LIMIT 1"));
+    }
+
+    @Override
+    public Aligner findLatestAlignerOfUser(Long userId) {
+        if (userId == null) {
+            return null;
+        }
+        List<Stage> stages = stageMapper.selectList(new LambdaQueryWrapper<Stage>()
+                .eq(Stage::getUserId, userId)
+                .select(Stage::getId));
+        if (stages == null || stages.isEmpty()) {
+            return null;
+        }
+        List<Long> stageIds = new ArrayList<>(stages.size());
+        for (Stage st : stages) {
+            stageIds.add(st.getId());
+        }
+        // 优先取已排期副中开始日期最近、序号最大者（MySQL DESC 下 NULL 最前，须先滤除未排期副）；
+        // 全部未排期（阶段未设置开始日期）时回退创建时间最新
+        Aligner latest = alignerMapper.selectOne(new LambdaQueryWrapper<Aligner>()
+                .in(Aligner::getStageId, stageIds)
+                .isNotNull(Aligner::getStartDate)
+                .orderByDesc(Aligner::getStartDate)
+                .orderByDesc(Aligner::getNum)
+                .last("LIMIT 1"));
+        if (latest != null) {
+            return latest;
+        }
+        return alignerMapper.selectOne(new LambdaQueryWrapper<Aligner>()
+                .in(Aligner::getStageId, stageIds)
+                .orderByDesc(Aligner::getCreatedAt)
+                .orderByDesc(Aligner::getNum)
+                .last("LIMIT 1"));
+    }
+
+    @Override
+    public int alignerPlannedDays(Long alignerId) {
+        Aligner aligner = alignerId == null ? null : alignerMapper.selectById(alignerId);
+        if (aligner == null) {
+            return 0;
+        }
+        if (aligner.getTotalDays() != null && aligner.getTotalDays() > 0) {
+            return aligner.getTotalDays();
+        }
+        Stage stage = stageMapper.selectById(aligner.getStageId());
+        Integer fallback = stage == null ? null : StageModeSupport.resolveDefaultDays(stage, aligner);
+        return fallback != null && fallback > 0 ? fallback : 1;
     }
 
     @Override

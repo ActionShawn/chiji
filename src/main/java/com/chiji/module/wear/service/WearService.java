@@ -3,6 +3,7 @@ package com.chiji.module.wear.service;
 import com.chiji.module.wear.dto.WearMakeupRequest;
 import com.chiji.module.wear.dto.WearMorningBackfillRequest;
 import com.chiji.module.wear.dto.WearSessionEditRequest;
+import com.chiji.module.wear.vo.ConsultSummaryVO;
 import com.chiji.module.wear.vo.GoalVO;
 import com.chiji.module.wear.vo.TodaySessionVO;
 import com.chiji.module.wear.vo.TodayWearVO;
@@ -159,4 +160,66 @@ public interface WearService {
      * @return 操作后的今日工作台
      */
     TodayWearVO deleteSession(Long userId, Long sessionId);
+
+    /**
+     * 摘下超时提醒下发围栏（BE-6 handler 执行时调用）：该摘下事件对应的会话确实存在且
+     * 已被摘下动作收口，且用户此后未戴回（当前无任何佩戴中会话）。
+     * <p>
+     * 戴回 / 换副会按业务键 {@code takeoff-timeout:<sessionId>} 取消任务；本围栏兜底
+     * 取消与执行的竞态。
+     *
+     * @param userId    用户 ID
+     * @param sessionId 摘下动作收口的佩戴会话 ID
+     * @return true 表示仍处摘下中，可继续下发
+     */
+    boolean isTakeoffSessionOpen(Long userId, Long sessionId);
+
+    /**
+     * 最近一条已收口（摘下）的佩戴会话 ID（BE-5 换副取消摘下超时任务时定位业务键用）。
+     *
+     * @param userId 用户 ID
+     * @return 最近收口会话 ID；无任何已收口会话返回 null
+     */
+    Long latestClosedSessionId(Long userId);
+
+    /**
+     * 用户当前每日佩戴目标（秒；缺失或非法回退默认目标）。
+     * <p>
+     * 供摘下超时提醒跨零点重算使用（2026-10-08 新口径：跨日到点须按「新一天目标」重算，
+     * 不能用摘下时刻的快照值——用户可能已改目标）。
+     *
+     * @param userId 用户 ID
+     * @return 目标秒数
+     */
+    int currentGoalSec(Long userId);
+
+    /**
+     * 取消最近一次摘下投递的超时任务（BE-5：换副结算旧会话事务内调用，幂等）。
+     * <p>
+     * 业务键按「最近一条已收口会话」定位；无摘下记录时为无害空操作。
+     * 覆盖两种换副场景：佩戴中换副（旧会话刚被拆分收口）与摘下中换副（任务已投递未触发）。
+     *
+     * @param userId 用户 ID
+     */
+    void cancelLatestTakeoffTimeout(Long userId);
+
+    /**
+     * 复诊小结统计（BE-8）。
+     * <p>
+     * 口径：未达标 = 当日实际 &lt; 个人目标（无「接近」档）；目标时长设置日（{@code user_setting}
+     * 最近更新日）之前的日子不计入未达标（无基准不评判），中途改目标不追溯；跨零点会话按
+     * 自然日切分归属（与今日工作台/统计共用 {@code WearDayMath.distribute} 同一套切分）。
+     * 三态由后端权威判定（viewState）：DATA（周期内有佩戴记录）/ STAGE_NO_RECORD（有阶段但
+     * 所选周期内零打卡）/ NO_STAGE（从未创建阶段，含 stageId 非本人且无任何副）；empty 收窄为
+     * viewState != DATA。周期终点真实判定：进行中/含今日 endDate=null 且 inProgress=true；
+     * 已结束阶段统计窗口收口至阶段结束日（不混入后续阶段会话）。ALIGNER 档无进行中副回落
+     * 「本阶段最后一副全程」，阶段不可解析再回落用户最近一副；recordDays 为周期内有佩戴
+     * 记录的天数（含补录），与 aligner.wornDays 的副自然日口径不同名不混用。
+     *
+     * @param userId  用户 ID
+     * @param period  ALIGNER（本副）/ STAGE（阶段）/ LAST30（近 30 天）
+     * @param stageId period=STAGE 时的目标阶段（语义与月历接口一致：空回退 ACTIVE 阶段）
+     * @return 复诊小结统计视图
+     */
+    ConsultSummaryVO consultSummary(Long userId, String period, Long stageId);
 }

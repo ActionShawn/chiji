@@ -102,4 +102,12 @@ public interface NotificationSettingService {
      * @return 提前天数
      */
     int clinicBookOffset(Long userId);
+
+    /**
+     * 用户配置的摘下超时提醒方式（BE-4 摘下投递延迟时长依据）。
+     *
+     * @param userId 用户 ID
+     * @return HALF_HOUR / ONE_HOUR / SMART；缺失或非法回退 HALF_HOUR
+     */
+    String takeoffRemindMode(Long userId);
 }

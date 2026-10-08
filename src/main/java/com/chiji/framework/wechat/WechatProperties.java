@@ -46,6 +46,9 @@ public class WechatProperties {
         /** 预约提醒模板 ID（隐形最终副临近戴完提醒预约复诊）。 */
         private String clinicBookTemplateId;
 
+        /** 摘下超时提醒模板 ID（佩戴体验迭代，与换副模板严格隔离）。 */
+        private String takeoffTimeoutTemplateId;
+
         /** 点击模板消息的跳转页。 */
         private String page = "pages/index/index";
 
@@ -65,6 +68,11 @@ public class WechatProperties {
         /** 预约提醒通道是否可用。 */
         public boolean isClinicBookReady() {
             return enabled && isNotBlank(clinicBookTemplateId);
+        }
+
+        /** 摘下超时提醒通道是否可用。 */
+        public boolean isTakeoffTimeoutReady() {
+            return enabled && isNotBlank(takeoffTimeoutTemplateId);
         }
 
         private boolean isNotBlank(String v) {

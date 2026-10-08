@@ -57,6 +57,12 @@ public class NotificationSettingServiceImpl implements NotificationSettingServic
     private static final int DEFAULT_CLINIC_VISIT_OFFSET = 0;
     private static final int DEFAULT_CLINIC_BOOK_OFFSET = 2;
 
+    /** 摘下超时提醒方式值域（user_setting.takeoff_remind_mode） */
+    private static final List<String> TAKEOFF_MODES = List.of("HALF_HOUR", "ONE_HOUR", "SMART");
+
+    /** 摘下超时提醒方式缺省值 */
+    private static final String DEFAULT_TAKEOFF_MODE = "HALF_HOUR";
+
     private final UserSettingMapper userSettingMapper;
     private final UserNotificationConfigMapper configMapper;
     private final MessageMapper messageMapper;
@@ -127,6 +133,12 @@ public class NotificationSettingServiceImpl implements NotificationSettingServic
                 throw new BusinessException(ErrorCode.NOTIFICATION_PARAM_INVALID, "预约提醒时机不合法");
             }
             s.setClinicBookOffset(req.clinicBookOffset());
+        }
+        if (req.takeoffRemindMode() != null) {
+            if (!TAKEOFF_MODES.contains(req.takeoffRemindMode())) {
+                throw new BusinessException(ErrorCode.NOTIFICATION_PARAM_INVALID, "摘下超时提醒方式不合法");
+            }
+            s.setTakeoffRemindMode(req.takeoffRemindMode());
         }
 
         // 2. 一键应用预设：覆盖 8 类开关明细
@@ -206,6 +218,14 @@ public class NotificationSettingServiceImpl implements NotificationSettingServic
         return WearTimes.now().getHour() == remindTime.getHour();
     }
 
+    /** 用户配置的摘下超时提醒方式；缺失或非法回退 HALF_HOUR。 */
+    public String takeoffRemindMode(Long userId) {
+        UserSetting s = userSettingMapper.selectOne(new LambdaQueryWrapper<UserSetting>()
+                .eq(UserSetting::getUserId, userId));
+        return s != null && TAKEOFF_MODES.contains(s.getTakeoffRemindMode())
+                ? s.getTakeoffRemindMode() : DEFAULT_TAKEOFF_MODE;
+    }
+
     /** 用户配置的就诊提醒提前天数（0~2）；缺失或非法回退 0（当天）。 */
     public int clinicVisitOffset(Long userId) {
         UserSetting s = userSettingMapper.selectOne(new LambdaQueryWrapper<UserSetting>()
@@ -253,13 +273,16 @@ public class NotificationSettingServiceImpl implements NotificationSettingServic
                 ? s.getClinicVisitOffset() : DEFAULT_CLINIC_VISIT_OFFSET;
         int bookOffset = s != null && isClinicOffsetValid(s.getClinicBookOffset())
                 ? s.getClinicBookOffset() : DEFAULT_CLINIC_BOOK_OFFSET;
+        String takeoffMode = s != null && TAKEOFF_MODES.contains(s.getTakeoffRemindMode())
+                ? s.getTakeoffRemindMode() : DEFAULT_TAKEOFF_MODE;
+        int takeoffRemain = subscribeQuotaService.takeoffDailyQuota(userId).remainToday();
         return new NotificationSettingsVO(
                 master, popup, badge, preset,
                 new DndSettingVO(dndOn, dndStart.format(HH_MM), dndEnd.format(HH_MM)),
                 wxSubscribeClient.isEnabled(), types,
                 alignerTime.format(HH_MM), alignerOffset, subscribeRemain,
                 clinicTime.format(HH_MM), bookTime.format(HH_MM), visitOffset, bookOffset,
-                clinicVisitRemain, clinicBookRemain);
+                clinicVisitRemain, clinicBookRemain, takeoffMode, takeoffRemain);
     }
 
     /** 读取已落行的开关明细；未落行不在 map 中（由呈现层按默认值兜底）。 */

@@ -65,8 +65,15 @@ public class UserSetting {
     /** 预约提醒提前天数：0~2 天（缺省 2，仅隐形最终副生效） */
     private Integer clinicBookOffset;
 
+    /** 摘下超时提醒方式：HALF_HOUR(固定半小时)/ONE_HOUR(固定一小时)/SMART(智能提醒)，默认 HALF_HOUR */
+    private String takeoffRemindMode;
+
     /** 每日佩戴目标（秒，默认 20h=72000；可调 18.0–22.0h，步进 0.5h） */
     private Integer goalSec;
+
+    /** 每日佩戴目标最近设置/修改时刻（NULL=未记录或迁移前旧数据；复诊小结未达标基准日
+     * 优先取此列日期，NULL 宽松回退 updated_at 近似——仅目标变化时刷新，其他设置项保存不动它） */
+    private LocalDateTime goalUpdatedAt;
 
     /** 通知总开关：false 关闭（不再生成/归档提醒消息） */
     private Boolean notifMaster;

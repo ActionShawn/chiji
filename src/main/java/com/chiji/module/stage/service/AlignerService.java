@@ -145,4 +145,55 @@ public interface AlignerService {
      * @return 当时佩戴的副；无则 null
      */
     Aligner findWornAligner(Long userId, LocalDate date, String mode);
+
+    /**
+     * 解析复诊小结等统计场景的「当前选中阶段」。
+     * <p>
+     * 语义与月历接口一致：stageId 非空时校验归属后返回；为空时回退用户 ACTIVE 阶段
+     * （多个 ACTIVE（跨模式）时取 LIMIT 1）。无匹配返回 null（调用方按空态处理）。
+     *
+     * @param userId  用户 ID
+     * @param stageId 前端选中的阶段 ID（可空）
+     * @return 目标阶段；无则 null
+     */
+    Stage resolveStage(Long userId, Long stageId);
+
+    /**
+     * 阶段内「最后一副」（副序号最大者）。
+     * <p>
+     * 供复诊小结等统计场景使用：ALIGNER 档无进行中副时回落「本阶段最后一副全程」；
+     * 已结束阶段的统计窗口收口至该副结束日（阶段无独立结束日列，由最后一副派生）。
+     *
+     * @param stageId 阶段 ID
+     * @return 最后一副；阶段无副或 stageId 为空返回 null
+     */
+    Aligner findLastAlignerOfStage(Long stageId);
+
+    /**
+     * 用户「最近一副」（跨该用户全部阶段的副中，开始日期最近、序号最大者；全部未排期时回退创建时间最新）。
+     * <p>
+     * 供复诊小结在阶段不可解析时（如阶段已全部结束且未显式传 stageId）回落取副，
+     * 避免把有完整佩戴历史的用户误判为「从未创建阶段」。
+     *
+     * @param userId 用户 ID
+     * @return 最近一副；用户无任何阶段/副返回 null
+     */
+    Aligner findLatestAlignerOfUser(Long userId);
+
+    /**
+     * 阶段内牙套副总数（双模含软/硬全部节点）。
+     *
+     * @param stageId 阶段 ID
+     * @return 副总数（无数据为 0）
+     */
+    int countAligners(Long stageId);
+
+    /**
+     * 某副的计划佩戴天数：优先该副自身 totalDays（可能被手动调整过），
+     * 缺失按膜片类型回退阶段配置（双模软/硬天数），再兜底 1。
+     *
+     * @param alignerId 牙套副 ID
+     * @return 计划天数
+     */
+    int alignerPlannedDays(Long alignerId);
 }

@@ -10,6 +10,7 @@ import com.chiji.module.wear.dto.WearPunchRequest;
 import com.chiji.module.wear.dto.GoalUpdateRequest;
 import com.chiji.module.wear.dto.WearSessionEditRequest;
 import com.chiji.module.wear.service.WearService;
+import com.chiji.module.wear.vo.ConsultSummaryVO;
 import com.chiji.module.wear.vo.GoalVO;
 import com.chiji.module.wear.vo.TodaySessionVO;
 import com.chiji.module.wear.vo.TodayWearVO;
@@ -117,6 +118,17 @@ public class WearController {
     @GetMapping("/aligner/{alignerId}/summary")
     public R<WearAlignerSummaryVO> alignerSummary(@PathVariable Long alignerId) {
         return R.ok(wearService.alignerSummary(SecurityUtil.getCurrentUserId(), alignerId));
+    }
+
+    @Operation(summary = "复诊小结统计",
+            description = "period = ALIGNER（本副）/ STAGE（阶段，stageId 空回退当前阶段）/ LAST30（近 30 天）；"
+                    + "返回后端权威三态 viewState（DATA / STAGE_NO_RECORD / NO_STAGE）、周期起止、记录天数、"
+                    + "日均/总时长、未达标日、所属阶段与副进度；有阶段无打卡或从未创建阶段返回结构化空标记")
+    @GetMapping("/consult-summary")
+    public R<ConsultSummaryVO> consultSummary(
+            @RequestParam String period,
+            @RequestParam(required = false) Long stageId) {
+        return R.ok(wearService.consultSummary(SecurityUtil.getCurrentUserId(), period, stageId));
     }
 
     /** 解析 yyyy-MM-dd，非法抛佩戴参数错误（避免 500）。 */

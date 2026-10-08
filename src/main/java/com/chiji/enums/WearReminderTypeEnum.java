@@ -31,6 +31,8 @@ public enum WearReminderTypeEnum implements IEnum<String> {
     WEAR_BEDTIME("WEAR_BEDTIME", "睡前佩戴提醒", "佩戴打卡", true, 1, MessageCategoryEnum.WEAR),
     /** 佩戴结算结果（次日 00:30，结算昨天） */
     WEAR_SETTLE("WEAR_SETTLE", "佩戴结算结果", "佩戴打卡", true, 1, MessageCategoryEnum.WEAR),
+    /** 摘下超时提醒（订阅消息通道；默认关闭，通知设置页开启后按 remindMode 摘下投递延迟任务） */
+    TAKEOFF_TIMEOUT("TAKEOFF_TIMEOUT", "摘下超时提醒", "佩戴打卡", false, 1, MessageCategoryEnum.WEAR),
     /** 达标庆祝（今日首次达标实时触发，一天一次） */
     WEAR_CELEBRATE("WEAR_CELEBRATE", "达标庆祝", "佩戴打卡", true, 2, MessageCategoryEnum.WEAR),
     /** 换副提醒 */
