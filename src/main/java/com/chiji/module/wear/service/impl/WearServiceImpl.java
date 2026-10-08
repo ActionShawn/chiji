@@ -796,15 +796,65 @@ public class WearServiceImpl implements WearService {
         if (session == null || !userId.equals(session.getUserId())) {
             throw new BusinessException(ErrorCode.WEAR_SESSION_NOT_FOUND);
         }
-        if (!WearSourceEnum.MAKEUP.getCode().equals(session.getSource())) {
-            throw new BusinessException(ErrorCode.WEAR_EDIT_FORBIDDEN, "仅补录段可删除");
+        if (session.getEndedAt() == null) {
+            throw new BusinessException(ErrorCode.WEAR_EDIT_FORBIDDEN, "佩戴中的会话不能删除，请先「我摘下了」或使用「撤销」");
         }
-        LocalDate date = session.getMakeupFor() == null ? session.getStartedAt().toLocalDate() : session.getMakeupFor();
+        String source = session.getSource();
+        if (!WearSourceEnum.MANUAL.getCode().equals(source) && !WearSourceEnum.MAKEUP.getCode().equals(source)) {
+            throw new BusinessException(ErrorCode.WEAR_EDIT_FORBIDDEN, "该佩戴记录不可删除");
+        }
+        LocalDate from = session.getStartedAt().toLocalDate();
+        LocalDate to = session.getEndedAt().toLocalDate();
         logEdit(userId, sessionId, "DELETE", "", session.getStartedAt(), null);
         wearSessionMapper.deleteById(sessionId);
-        log.info("佩戴补录段删除, userId={}, sessionId={}, date={}", userId, sessionId, date);
-        wearSettleService.settleDay(userId, date);
+        log.info("佩戴会话删除, userId={}, sessionId={}, source={}, from={}, to={}", userId, sessionId, source, from, to);
+        // 跨夜会话可能覆盖多个自然日，逐日重算结算
+        for (LocalDate d = from; !d.isAfter(to); d = d.plusDays(1)) {
+            wearSettleService.settleDay(userId, d);
+        }
         return readToday(userId);
+    }
+
+    // ── 跨夜会话按自然日拆分（每日 00:10 定时） ─────────────
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public int splitOpenSessionsAcrossMidnight() {
+        LocalDate today = WearTimes.today();
+        LocalDateTime todayStart = WearTimes.startOf(today);
+        // 仍佩戴中且始于今天之前：跨过至少一个自然日边界，需逐日切开
+        List<WearSession> opens = wearSessionMapper.selectList(new LambdaQueryWrapper<WearSession>()
+                .isNull(WearSession::getEndedAt)
+                .lt(WearSession::getStartedAt, todayStart)
+                .orderByAsc(WearSession::getStartedAt)
+                .orderByAsc(WearSession::getId));
+        int total = 0;
+        for (WearSession open : opens) {
+            Long userId = open.getUserId();
+            LocalDate d = open.getStartedAt().toLocalDate();
+            WearSession current = open;
+            int cut = 0;
+            // 逐日收口：d 日结束时间 = 次日 00:00；再为 d+1 日另起一条（仍佩戴中）
+            while (d.isBefore(today)) {
+                LocalDateTime boundary = WearTimes.endOf(d);
+                current.setEndedAt(boundary);
+                wearSessionMapper.updateById(current);
+                wearSettleService.settleDay(userId, d);
+                WearSession next = newSession(userId, WearSourceEnum.MANUAL, null, boundary, null);
+                next.setSource(current.getSource());
+                next.setAlignerId(current.getAlignerId());
+                wearSessionMapper.insert(next);
+                current = next;
+                d = d.plusDays(1);
+                cut++;
+            }
+            total += cut;
+            log.info("跨夜佩戴会话按自然日拆分, userId={}, openSessionId={}, 切分次数={}", userId, open.getId(), cut);
+        }
+        if (!opens.isEmpty()) {
+            log.info("跨夜佩戴会话拆分完成, 会话数={}, 切分次数={}", opens.size(), total);
+        }
+        return total;
     }
 
     // ── 内部读取 ────────────────────────────────────────────

@@ -90,7 +90,7 @@ public class WearController {
         return R.ok(wearService.updateSession(SecurityUtil.getCurrentUserId(), id, request));
     }
 
-    @Operation(summary = "删除补录段", description = "仅 source=MAKEUP 的会话可删，二次确认由前端负责")
+    @Operation(summary = "删除佩戴会话", description = "已结束的打卡(MANUAL)/补录(MAKEUP)会话均可删，删除后重算覆盖到的自然日结算；二次确认由前端负责")
     @DeleteMapping("/sessions/{id}")
     public R<TodayWearVO> deleteSession(@PathVariable Long id) {
         return R.ok(wearService.deleteSession(SecurityUtil.getCurrentUserId(), id));

@@ -9,6 +9,7 @@ import com.chiji.module.message.service.ProgressReminderService;
 import com.chiji.module.message.service.ReminderNotifyService;
 import com.chiji.module.stage.service.AlignerService;
 import com.chiji.module.wear.service.WearQueryService;
+import com.chiji.module.wear.service.WearService;
 import com.chiji.module.wear.service.WearSettleService;
 import com.chiji.module.wear.support.WearDayMath;
 import com.chiji.module.wear.support.WearTimes;
@@ -24,6 +25,7 @@ import java.util.List;
 /**
  * 佩戴定时任务（Asia/Shanghai 时区）。
  * <ul>
+ *   <li>00:10 跨夜拆分：把仍佩戴中且跨过 00:00 的会话在自然日边界切开，逐日独立成行</li>
  *   <li>00:30 每日结算：结算昨天有佩戴会话的用户，并归档「佩戴结算结果」信箱消息</li>
  *   <li>22:30 睡前提醒：给「有当前佩戴阶段、当前未佩戴、且允许睡前提醒」的用户归档提醒</li>
  * </ul>
@@ -39,6 +41,7 @@ public class WearScheduledJob {
     @Value("${chiji.job.enabled:true}")
     private boolean enabled;
 
+    private final WearService wearService;
     private final WearSettleService wearSettleService;
     private final WearQueryService wearQueryService;
     private final NotificationSettingService notificationSettingService;
@@ -46,6 +49,25 @@ public class WearScheduledJob {
     private final ProgressReminderService progressReminderService;
     private final AlignerService alignerService;
     private final UserService userService;
+
+    /**
+     * 每日 00:10 跨夜会话按自然日拆分（Asia/Shanghai）。
+     * <p>
+     * 把「跨过 00:00 仍佩戴中」的会话在自然日边界切开：前一天收口为 {@code startedAt → 次日00:00}，
+     * 并为当天另起一条 00:00 起的佩戴中会话。使每个自然日对应独立一行，删除/编辑某天不再波及别的天。
+     */
+    @Scheduled(cron = "0 10 0 * * *", zone = "Asia/Shanghai")
+    public void midnightSplit() {
+        if (!enabled) {
+            return;
+        }
+        try {
+            int splits = wearService.splitOpenSessionsAcrossMidnight();
+            log.info("跨夜会话拆分 job 结束, 切分次数={}", splits);
+        } catch (Exception e) {
+            log.warn("跨夜会话拆分 job 失败", e);
+        }
+    }
 
     /**
      * 每日 00:30 结算昨天（Asia/Shanghai）。

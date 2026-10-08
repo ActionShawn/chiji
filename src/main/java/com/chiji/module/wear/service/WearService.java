@@ -151,15 +151,26 @@ public interface WearService {
     TodayWearVO updateSession(Long userId, Long sessionId, WearSessionEditRequest req);
 
     /**
-     * 删除某佩戴会话（仅 {@code source=MAKEUP} 可删，二次确认由前端负责）。
+     * 删除某条已结束的佩戴会话（{@code source} 为 MANUAL 打卡 或 MAKEUP 补录均可删，二次确认由前端负责）。
      * <p>
-     * 删除前写 DELETE 留痕，随后重算当日结算。
+     * 删除前写 DELETE 留痕；跨夜会话可能覆盖多个自然日，删除后重算其覆盖到的每一天结算。
      *
      * @param userId    用户 ID
      * @param sessionId 会话 ID
      * @return 操作后的今日工作台
      */
     TodayWearVO deleteSession(Long userId, Long sessionId);
+
+    /**
+     * 跨夜会话按自然日拆分（每日 00:10 定时任务调用）。
+     * <p>
+     * 把「跨过 00:00 仍佩戴中」的会话在自然日边界切开：前一天收口为 {@code startedAt → 次日00:00}，
+     * 并为当天另起一条 00:00 起的佩戴中会话（继承 {@code source}/{@code alignerId}）。使每个自然日
+     * 对应独立一行，删除/编辑某天不再波及别的天；收口的每一天重算结算。缺当日任务时可跨多日自愈补齐。
+     *
+     * @return 实际切分出的会话条数（0 表示无跨夜佩戴中会话）
+     */
+    int splitOpenSessionsAcrossMidnight();
 
     /**
      * 摘下超时提醒下发围栏（BE-6 handler 执行时调用）：该摘下事件对应的会话确实存在且
