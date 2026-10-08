@@ -172,3 +172,20 @@ chiji:
   # 开发者在线测试模块（/api/dev/**）：默认关闭；开启后该前缀路由免登录，仅联调环境临时打开
   dev-test:
     enabled: ${CHIJI_DEV_TEST_ENABLED:false}
+  # 统一延迟任务队列（chiji-delay）：业务事务内投递，DB delay_task 表为真相源，泵 SKIP LOCKED 取到期任务
+  delay:
+    queue:
+      # 组件总开关（回滚开关）：false 时泵停转、submit 静默跳过，存量 PENDING 行保留、重启开启即恢复
+      enabled: ${CHIJI_DELAY_QUEUE_ENABLED:true}
+      # 泵轮询间隔 ms（到期触发误差 ≤ 该间隔）
+      poll-interval-ms: 10000
+      # 泵单轮最大取出任务数
+      batch-size: 50
+      # RUNNING 租约时长（秒），必须大于 handler 最大执行时长，否则执行中任务会被回收重投
+      lease-seconds: 120
+      # 最大重试次数：retry_count 超过该值置 FAILED（单任务最多执行 max-retry + 1 次）
+      max-retry: 5
+      # 重试退避基数（秒）：第 k 次重试顺延 base × 2^(k-1)，即 30s/60s/120s/...
+      retry-backoff-base-seconds: 30
+      # 终态行保留天数（CleanJob 每日 03:40 按 finished_at 物理清理）
+      retention-days: 30
