@@ -38,7 +38,7 @@ public interface FeedbackCommentMapper extends BaseMapper<FeedbackComment> {
      *
      * @return 未读用户消息数
      */
-    @Select("(SELECT COUNT(*) FROM feedback WHERE deleted = 0 "
+    @Select("SELECT (SELECT COUNT(*) FROM feedback WHERE deleted = 0 "
             + "AND (admin_read_at IS NULL OR created_at > admin_read_at)) "
             + "+ (SELECT COUNT(*) FROM feedback_comment c "
             + "JOIN feedback f ON f.id = c.feedback_id AND f.deleted = 0 "
