@@ -41,14 +41,23 @@ public class Feedback {
     /** 联系方式值（手机号或邮箱，可空） */
     private String contact;
 
-    /** 处理状态：FeedbackStatusEnum.name()，PENDING(待处理)/PROCESSED(已处理) */
+    /** 处理状态：FeedbackStatusEnum.name()，WAIT_ADMIN(等回复)/WAIT_USER(待你确认)/CLOSED(已闭环) */
     private String status;
 
-    /** 管理员回复（预留，暂未暴露给前端） */
+    /** 最新运营回复镜像（历史版本客户端展示用；迁移时已迁入 feedback_comment，线程视图只读评论表） */
     private String reply;
 
-    /** 回复时间（预留） */
+    /** 最近回复时间（镜像） */
     private LocalDateTime repliedAt;
+
+    /** 用户最近进入对话详情页时刻（NULL=从未进入，存在运营评论即算未读） */
+    private LocalDateTime userReadAt;
+
+    /** 运营最近进入对话详情页时刻（NULL=从未进入，该反馈全部用户消息算未读） */
+    private LocalDateTime adminReadAt;
+
+    /** 用户点「已解决」的闭环时刻（5 秒撤回窗口判定基准） */
+    private LocalDateTime closedAt;
 
     /** 创建时间，插入时自动填充 */
     @TableField(fill = FieldFill.INSERT)

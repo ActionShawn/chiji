@@ -1,10 +1,12 @@
 package com.chiji.module.admin.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.chiji.common.core.exception.BusinessException;
 import com.chiji.common.core.exception.ErrorCode;
 import com.chiji.common.core.page.CursorPage;
 import com.chiji.entity.Feedback;
+import com.chiji.entity.FeedbackComment;
 import com.chiji.entity.FeedbackImage;
 import com.chiji.entity.User;
 import com.chiji.enums.FeedbackStatusEnum;
@@ -12,8 +14,15 @@ import com.chiji.module.admin.dto.AdminReplyFeedbackRequest;
 import com.chiji.module.admin.service.AdminFeedbackService;
 import com.chiji.module.admin.vo.AdminFeedbackVO;
 import com.chiji.module.auth.mapper.UserMapper;
+import com.chiji.module.feedback.dto.AddCommentRequest;
+import com.chiji.module.feedback.mapper.FeedbackCommentMapper;
 import com.chiji.module.feedback.mapper.FeedbackImageMapper;
 import com.chiji.module.feedback.mapper.FeedbackMapper;
+import com.chiji.module.feedback.service.FeedbackCommentLoader;
+import com.chiji.module.feedback.support.FeedbackCommentSupport;
+import com.chiji.module.feedback.vo.AddCommentResultVO;
+import com.chiji.module.feedback.vo.FeedbackCommentVO;
+import com.chiji.module.feedback.vo.FeedbackThreadVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,6 +36,9 @@ import java.util.stream.Collectors;
 
 /**
  * 管理端反馈服务实现。
+ * <p>
+ * 2026-10-08 对话化改造：回复 = 追加 ADMIN 评论（并镜像 reply 供历史版本客户端展示）；
+ * 关闭/重开已禁用（闭环权归用户）。
  */
 @Service
 @RequiredArgsConstructor
@@ -37,26 +49,17 @@ public class AdminFeedbackServiceImpl implements AdminFeedbackService {
 
     private final FeedbackMapper feedbackMapper;
     private final FeedbackImageMapper feedbackImageMapper;
+    private final FeedbackCommentMapper feedbackCommentMapper;
     private final UserMapper userMapper;
 
     @Override
     public CursorPage<AdminFeedbackVO> list(String status, int limit, Long cursor) {
         int pageSize = Math.min(Math.max(limit, 1), LIMIT_MAX);
 
-        FeedbackStatusEnum statusEnum = null;
-        if (status != null && !status.isBlank()) {
-            statusEnum = FeedbackStatusEnum.getByCode(status);
-            if (statusEnum == null) {
-                throw new BusinessException(ErrorCode.BAD_REQUEST, "状态参数不正确");
-            }
-        }
-
         LambdaQueryWrapper<Feedback> wrapper = new LambdaQueryWrapper<Feedback>()
                 .orderByDesc(Feedback::getId)
                 .last("LIMIT " + (pageSize + 1));
-        if (statusEnum != null) {
-            wrapper.eq(Feedback::getStatus, statusEnum.getCode());
-        }
+        applyStatusFilter(wrapper, status);
         if (cursor != null) {
             wrapper.lt(Feedback::getId, cursor);
         }
@@ -80,40 +83,106 @@ public class AdminFeedbackServiceImpl implements AdminFeedbackService {
         return new CursorPage<>(vos, nextLastId, hasMore);
     }
 
+    /** 状态筛选：新三态直接匹配；兼容历史版本客户端传入的 PENDING/PROCESSED */
+    private void applyStatusFilter(LambdaQueryWrapper<Feedback> wrapper, String status) {
+        if (status == null || status.isBlank()) {
+            return;
+        }
+        if ("PENDING".equals(status)) {
+            wrapper.eq(Feedback::getStatus, FeedbackStatusEnum.WAIT_ADMIN.getCode());
+            return;
+        }
+        if ("PROCESSED".equals(status)) {
+            wrapper.in(Feedback::getStatus, FeedbackStatusEnum.WAIT_USER.getCode(),
+                    FeedbackStatusEnum.CLOSED.getCode());
+            return;
+        }
+        FeedbackStatusEnum statusEnum = FeedbackStatusEnum.getByCode(status);
+        if (statusEnum == null) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "状态参数不正确");
+        }
+        wrapper.eq(Feedback::getStatus, statusEnum.getCode());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public FeedbackThreadVO<AdminFeedbackVO> thread(Long feedbackId) {
+        Feedback feedback = requireFeedback(feedbackId);
+        // 先清管理侧未读再拉取：晚于本次请求到达的新评论仍算未读
+        feedbackMapper.update(null, new LambdaUpdateWrapper<Feedback>()
+                .eq(Feedback::getId, feedback.getId())
+                .set(Feedback::getAdminReadAt, LocalDateTime.now()));
+        feedback.setAdminReadAt(LocalDateTime.now());
+
+        AdminFeedbackVO feedbackVO = toVO(feedback,
+                loadUsers(Set.of(feedback.getUserId())).get(feedback.getUserId()),
+                loadImages(List.of(feedback.getId()))
+                        .getOrDefault(feedback.getId(), Collections.emptyList()));
+        CursorPage<FeedbackCommentVO> page = FeedbackCommentLoader.loadPage(
+                feedbackCommentMapper, feedback.getId(), LIMIT_MAX, null);
+        return new FeedbackThreadVO<>(feedbackVO, page.items(), page.nextLastId(), page.hasMore());
+    }
+
+    @Override
+    public CursorPage<FeedbackCommentVO> comments(Long feedbackId, int limit, Long cursor) {
+        requireFeedback(feedbackId);
+        return FeedbackCommentLoader.loadPage(feedbackCommentMapper, feedbackId, limit, cursor);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public AddCommentResultVO addComment(Long feedbackId, AddCommentRequest request) {
+        Feedback feedback = requireFeedback(feedbackId);
+        if (FeedbackStatusEnum.getByCode(feedback.getStatus()) == FeedbackStatusEnum.CLOSED) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "该反馈已闭环，需用户追问后才能继续回复");
+        }
+
+        String content = FeedbackCommentSupport.normalizeContent(request.content());
+        List<String> images = FeedbackCommentSupport.normalizeImages(request.imageUrls());
+        FeedbackCommentSupport.requireMessage(content, images);
+
+        FeedbackComment comment = new FeedbackComment();
+        comment.setFeedbackId(feedbackId);
+        comment.setUserId(0L);
+        comment.setRole("ADMIN");
+        comment.setContent(content.isBlank() ? null : content);
+        comment.setImages(images.isEmpty() ? "" : FeedbackCommentSupport.toJson(images));
+        feedbackCommentMapper.insert(comment);
+
+        // 运营回复 → 待用户确认；同时镜像 reply/replied_at 供历史版本客户端展示
+        feedbackMapper.update(null, new LambdaUpdateWrapper<Feedback>()
+                .eq(Feedback::getId, feedbackId)
+                .set(Feedback::getStatus, FeedbackStatusEnum.WAIT_USER.getCode())
+                .set(Feedback::getReply, content.isBlank() ? feedback.getReply() : content)
+                .set(Feedback::getRepliedAt, comment.getCreatedAt() != null ? comment.getCreatedAt() : LocalDateTime.now())
+                .set(Feedback::getClosedAt, null));
+        return new AddCommentResultVO(FeedbackCommentSupport.toVO(comment),
+                FeedbackStatusEnum.WAIT_USER.getCode(), FeedbackStatusEnum.WAIT_USER.getDesc());
+    }
+
     @Override
     @Transactional(rollbackFor = Exception.class)
     public AdminFeedbackVO reply(Long feedbackId, AdminReplyFeedbackRequest request) {
-        Feedback feedback = requireFeedback(feedbackId);
-
-        String reply = request.reply() == null ? "" : request.reply().trim();
-        if (reply.isBlank()) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST, "回复内容不能为空");
-        }
-
-        feedback.setReply(reply);
-        feedback.setRepliedAt(LocalDateTime.now());
-        feedback.setStatus(FeedbackStatusEnum.PROCESSED.name());
-        feedbackMapper.updateById(feedback);
-
-        return assembleVO(feedback);
+        // 历史接口兼容：等价于纯文本追加评论
+        addComment(feedbackId, new AddCommentRequest(request.reply(), null));
+        return assembleVO(requireFeedback(feedbackId));
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
+    @Deprecated
     public AdminFeedbackVO close(Long feedbackId) {
-        Feedback feedback = requireFeedback(feedbackId);
-        feedback.setStatus(FeedbackStatusEnum.PROCESSED.name());
-        feedbackMapper.updateById(feedback);
-        return assembleVO(feedback);
+        throw new BusinessException(ErrorCode.FORBIDDEN, "闭环由用户点「已解决」完成，运营不可单方关闭");
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
+    @Deprecated
     public AdminFeedbackVO reopen(Long feedbackId) {
-        Feedback feedback = requireFeedback(feedbackId);
-        feedback.setStatus(FeedbackStatusEnum.PENDING.name());
-        feedbackMapper.updateById(feedback);
-        return assembleVO(feedback);
+        throw new BusinessException(ErrorCode.FORBIDDEN, "状态流转由用户追问驱动，运营不可重开");
+    }
+
+    @Override
+    public long unreadCount() {
+        return feedbackCommentMapper.countAdminUnread();
     }
 
     private Feedback requireFeedback(Long feedbackId) {

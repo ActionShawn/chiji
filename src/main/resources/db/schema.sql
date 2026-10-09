@@ -258,9 +258,12 @@ CREATE TABLE IF NOT EXISTS `feedback` (
     `content`      TEXT         NOT NULL COMMENT '意见正文',
     `contact_type` VARCHAR(16)  DEFAULT NULL COMMENT '联系方式类型：FeedbackContactTypeEnum.name()，PHONE/EMAIL，未留联系方式为 null',
     `contact`      VARCHAR(64)  DEFAULT NULL COMMENT '联系方式值（手机号或邮箱，可空）',
-    `status`       VARCHAR(16)  NOT NULL DEFAULT 'PENDING' COMMENT '处理状态：FeedbackStatusEnum.name()，PENDING(待处理)/PROCESSED(已处理)',
-    `reply`        VARCHAR(512) DEFAULT NULL COMMENT '管理员回复（预留）',
-    `replied_at`   DATETIME     DEFAULT NULL COMMENT '回复时间（预留）',
+    `status`       VARCHAR(16)  NOT NULL DEFAULT 'WAIT_ADMIN' COMMENT '处理状态：FeedbackStatusEnum.name()，WAIT_ADMIN(等回复)/WAIT_USER(待你确认)/CLOSED(已闭环)',
+    `reply`        VARCHAR(512) DEFAULT NULL COMMENT '最新运营回复镜像（历史版本客户端展示用；迁移时已迁入 feedback_comment，线程视图只读评论表）',
+    `replied_at`   DATETIME     DEFAULT NULL COMMENT '最近回复时间（镜像）',
+    `user_read_at` DATETIME     DEFAULT NULL COMMENT '用户最近进入对话详情页时刻（NULL=从未进入，按「存在未读的运营消息」计算）',
+    `admin_read_at` DATETIME    DEFAULT NULL COMMENT '管理员最近进入对话详情页时刻（NULL=从未进入，全部用户消息计未读）',
+    `closed_at`    DATETIME     DEFAULT NULL COMMENT '用户点「已解决」的闭环时刻（5 秒撤回窗口判定基准；仅 status=CLOSED 时有意义）',
     `created_at`   DATETIME     NOT NULL COMMENT '创建时间',
     `updated_at`   DATETIME     NOT NULL COMMENT '更新时间',
     `deleted`      TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '逻辑删除：0 正常 / 1 已删除',
@@ -280,6 +283,22 @@ CREATE TABLE IF NOT EXISTS `feedback_image` (
     PRIMARY KEY (`id`),
     KEY `idx_fbimg_feedback` (`feedback_id`) COMMENT '按反馈取图片列表'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='反馈图片表';
+
+-- 反馈评论（连续对话消息：用户与运营多轮往返，旧 reply 单条由代码合成展示不迁入）
+CREATE TABLE IF NOT EXISTS `feedback_comment` (
+    `id`          BIGINT        NOT NULL COMMENT '主键（雪花算法生成）',
+    `feedback_id` BIGINT        NOT NULL COMMENT '所属反馈 ID',
+    `user_id`     BIGINT        NOT NULL DEFAULT 0 COMMENT '发言人用户 ID：USER=提交用户；ADMIN=0（运营无用户账号）',
+    `role`        VARCHAR(8)    NOT NULL COMMENT '发言人角色：USER(用户)/ADMIN(运营)',
+    `content`     VARCHAR(1000) DEFAULT NULL COMMENT '评论正文（可空：允许仅图片，正文与图片至少一项非空）',
+    `images`      VARCHAR(2048) DEFAULT NULL COMMENT '图片地址 JSON 数组，如 ["https://...","https://..."]（无图为空串/NULL）',
+    `created_at`  DATETIME      NOT NULL COMMENT '创建时间',
+    `updated_at`  DATETIME      NOT NULL COMMENT '更新时间',
+    `deleted`     TINYINT(1)    NOT NULL DEFAULT 0 COMMENT '逻辑删除：0 正常 / 1 已删除',
+    PRIMARY KEY (`id`),
+    KEY `idx_fbc_feedback` (`feedback_id`, `id`) COMMENT '按反馈取对话消息（游标分页按 id 升序）',
+    KEY `idx_fbc_unread` (`role`, `created_at`) COMMENT '未读计数：按角色+时间扫描'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='反馈评论表（连续对话消息）';
 
 -- 佩戴会话（物理佩戴段：一戴一摘 = 一行，跨午夜不预拆，自然日归属在查询/结算时切分）
 CREATE TABLE IF NOT EXISTS `wear_session` (

@@ -28,5 +28,7 @@ public record FeedbackVO(
         /** 图片地址列表（无图片为空列表） */
         List<String> images,
         /** 提交时间 */
-        LocalDateTime createdAt) {
+        LocalDateTime createdAt,
+        /** 是否有未读运营回复（历史列表角标；进入详情后为 false） */
+        Boolean unread) {
 }

@@ -3,17 +3,25 @@ package com.chiji.enums;
 import com.baomidou.mybatisplus.annotation.IEnum;
 
 /**
- * 反馈处理状态枚举。
+ * 反馈处理状态枚举（三态：连续对话状态机，2026-10-08 对话化改造）。
  * <p>
- * 预留状态机扩展：PENDING（待处理）→ PROCESSED（已处理）；
- * 后续如需「处理中」等中间态，在枚举中追加即可，前端按 {@link #getCode()} 映射徽标。
+ * 流转规则（闭环权在用户）：
+ * <ul>
+ *   <li>提交 → {@link #WAIT_ADMIN}（等运营回复）</li>
+ *   <li>运营发评论 → {@link #WAIT_USER}（待用户确认）</li>
+ *   <li>用户发评论 → {@link #WAIT_ADMIN}（等运营回复；CLOSED 时为「追问」自动复活）</li>
+ *   <li>用户点「已解决」→ {@link #CLOSED}（5 秒内可撤回回 {@link #WAIT_USER}）</li>
+ *   <li>运营不可单方关闭/重开（接口已禁用）</li>
+ * </ul>
  */
 public enum FeedbackStatusEnum implements IEnum<String> {
 
-    /** 待处理：提交后默认状态 */
-    PENDING("PENDING", "待处理"),
-    /** 已处理：管理员已回复/已解决 */
-    PROCESSED("PROCESSED", "已处理");
+    /** 等回复：已提交，等待运营回复 */
+    WAIT_ADMIN("WAIT_ADMIN", "等待回复"),
+    /** 待你确认：运营已回复，等待用户确认闭环或追问 */
+    WAIT_USER("WAIT_USER", "待你确认"),
+    /** 已闭环：用户点「已解决」（或存量数据迁移映射），可追问复活 */
+    CLOSED("CLOSED", "已闭环");
 
     /** 编码（与枚举 name() 一致） */
     private final String code;
