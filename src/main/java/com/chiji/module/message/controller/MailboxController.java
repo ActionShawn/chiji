@@ -1,7 +1,10 @@
 package com.chiji.module.message.controller;
 
+import com.chiji.common.core.exception.BusinessException;
+import com.chiji.common.core.exception.ErrorCode;
 import com.chiji.common.core.result.R;
 import com.chiji.module.auth.util.SecurityUtil;
+import com.chiji.module.message.dto.MessageBatchRequest;
 import com.chiji.module.message.service.MessageService;
 import com.chiji.module.message.vo.MessagePageVO;
 import com.chiji.module.message.vo.UnreadVO;
@@ -11,10 +14,14 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
 
 /**
  * 信箱消息接口。
@@ -27,6 +34,9 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/messages")
 @RequiredArgsConstructor
 public class MailboxController {
+
+    /** 批量操作单次 id 上限（前端勾选上限 = 已加载页，分页 50/页兜底足够）。 */
+    private static final int IDS_MAX = 500;
 
     private final MessageService messageService;
 
@@ -69,5 +79,40 @@ public class MailboxController {
         Long userId = SecurityUtil.getCurrentUserId();
         messageService.deleteMessage(userId, id);
         return R.ok();
+    }
+
+    @Operation(summary = "批量标记已读", description = "按 id 集合置为已读（仅本人消息，幂等）")
+    @PutMapping("/batch-read")
+    public R<Void> batchRead(@RequestBody MessageBatchRequest req) {
+        Long userId = SecurityUtil.getCurrentUserId();
+        messageService.batchRead(userId, requireIds(req));
+        return R.ok();
+    }
+
+    @Operation(summary = "批量删除", description = "按 id 集合逻辑删除（仅本人消息）")
+    @PostMapping("/batch-delete")
+    public R<Void> batchDelete(@RequestBody MessageBatchRequest req) {
+        Long userId = SecurityUtil.getCurrentUserId();
+        messageService.deleteBatch(userId, requireIds(req));
+        return R.ok();
+    }
+
+    @Operation(summary = "删除全部消息", description = "逻辑删除当前用户全部消息（含未加载分页）")
+    @PostMapping("/delete-all")
+    public R<Void> deleteAll() {
+        Long userId = SecurityUtil.getCurrentUserId();
+        messageService.deleteAll(userId);
+        return R.ok();
+    }
+
+    /** 校验批量 ids：非空且不超上限，防止误传/滥用。 */
+    private static List<Long> requireIds(MessageBatchRequest req) {
+        if (req == null || req.ids() == null || req.ids().isEmpty()) {
+            throw new BusinessException(ErrorCode.MESSAGE_PARAM_INVALID, "消息 id 集合不能为空");
+        }
+        if (req.ids().size() > IDS_MAX) {
+            throw new BusinessException(ErrorCode.MESSAGE_PARAM_INVALID, "单次最多操作 " + IDS_MAX + " 条消息");
+        }
+        return req.ids();
     }
 }

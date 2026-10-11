@@ -96,6 +96,8 @@ public enum ErrorCode {
     MESSAGE_NOT_FOUND(80001, "消息不存在"),
     /** 通知设置参数不合法。 */
     NOTIFICATION_PARAM_INVALID(80002, "通知设置参数不合法"),
+    /** 信箱消息批量操作参数不合法（ids 为空/超上限等）。 */
+    MESSAGE_PARAM_INVALID(80003, "消息操作参数不合法"),
     // 90000+ 常用工具配置模块
     /** 常用工具配置不合法（key 格式/数量越界等）。 */
     TOOL_CONFIG_PARAM_INVALID(90001, "常用工具配置不合法"),

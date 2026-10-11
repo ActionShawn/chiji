@@ -98,4 +98,42 @@ public class MessageServiceImpl implements MessageService {
             throw new BusinessException(ErrorCode.MESSAGE_NOT_FOUND, "消息不存在");
         }
     }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public int batchRead(Long userId, List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return 0;
+        }
+        // read=false 条件保证幂等，已读消息不重复计数
+        int affected = messageMapper.update(null, new LambdaUpdateWrapper<Message>()
+                .eq(Message::getUserId, userId)
+                .in(Message::getId, ids)
+                .eq(Message::getRead, false)
+                .set(Message::getRead, true));
+        log.info("信箱批量已读, userId={}, ids={}, affected={}", userId, ids.size(), affected);
+        return affected;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public int deleteBatch(Long userId, List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return 0;
+        }
+        int affected = messageMapper.delete(new LambdaQueryWrapper<Message>()
+                .eq(Message::getUserId, userId)
+                .in(Message::getId, ids));
+        log.info("信箱批量删除, userId={}, ids={}, affected={}", userId, ids.size(), affected);
+        return affected;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public int deleteAll(Long userId) {
+        int affected = messageMapper.delete(new LambdaQueryWrapper<Message>()
+                .eq(Message::getUserId, userId));
+        log.info("信箱删除全部消息, userId={}, affected={}", userId, affected);
+        return affected;
+    }
 }

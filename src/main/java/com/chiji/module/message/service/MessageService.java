@@ -2,6 +2,8 @@ package com.chiji.module.message.service;
 
 import com.chiji.module.message.vo.MessagePageVO;
 
+import java.util.List;
+
 /**
  * 信箱消息服务（用户侧读取/已读/删除）。
  * <p>
@@ -45,4 +47,30 @@ public interface MessageService {
      * 逻辑删除单条消息（归属校验）。
      */
     void deleteMessage(Long userId, Long messageId);
+
+    /**
+     * 批量标记消息已读（仅作用于本人消息，未读的置为已读，幂等）。
+     *
+     * @param userId 当前用户 ID
+     * @param ids    消息 ID 集合（非空，上限 500）
+     * @return 实际置为已读的条数
+     */
+    int batchRead(Long userId, List<Long> ids);
+
+    /**
+     * 批量逻辑删除消息（仅作用于本人消息）。
+     *
+     * @param userId 当前用户 ID
+     * @param ids    消息 ID 集合（非空，上限 500）
+     * @return 实际删除条数
+     */
+    int deleteBatch(Long userId, List<Long> ids);
+
+    /**
+     * 逻辑删除当前用户全部消息（含未加载分页）。
+     *
+     * @param userId 当前用户 ID
+     * @return 实际删除条数
+     */
+    int deleteAll(Long userId);
 }
