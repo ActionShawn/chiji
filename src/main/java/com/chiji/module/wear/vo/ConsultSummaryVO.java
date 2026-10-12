@@ -20,6 +20,7 @@ import java.util.List;
  * @param avgSec     日均佩戴秒（按「有佩戴日」日均，与既有统计口径一致）
  * @param underCount 未达标日计数（未达标 = 当日实际 &lt; 个人目标，无「接近」档）
  * @param underDays  未达标日列表（目标基准日之前的日子不评判不纳入，见 PRD 边界）
+ * @param goalSec    本次评判所用每日目标秒（个人设置值；未设置回退默认 20h）；DATA 态直出用于前端展示目标基准，其余态为 0
  * @param inProgress 真实判定：统计窗口含今日（已结束阶段 / 已收口窗口为 false）
  * @param aligner    目标副进度（当前副 / 本阶段最后一副 / 最近一副，按档位回落）；无任何副为 null
  */
@@ -35,6 +36,7 @@ public record ConsultSummaryVO(
         long avgSec,
         int underCount,
         List<UnderDay> underDays,
+        long goalSec,
         boolean inProgress,
         AlignerProgress aligner
 ) {

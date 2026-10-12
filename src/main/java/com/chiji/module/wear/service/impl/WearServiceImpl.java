@@ -257,7 +257,7 @@ public class WearServiceImpl implements WearService {
         if (stage == null && target == null) {
             // 从未创建阶段（或 stageId 非本人且无任何副）：全空 NO_STAGE
             return new ConsultSummaryVO(p, ConsultSummaryVO.STATE_NO_STAGE, true,
-                    null, null, 0, null, 0, 0, 0, List.of(), false, null);
+                    null, null, 0, null, 0, 0, 0, List.of(), 0, false, null);
         }
 
         // 2. 周期起止：起点 = 副/阶段开始日（缺失回退今天，未来排期截断到今天）；
@@ -329,7 +329,7 @@ public class WearServiceImpl implements WearService {
         long avg = total / recordDays;
         return new ConsultSummaryVO(p, ConsultSummaryVO.STATE_DATA, false,
                 from.toString(), inProgress ? null : rawEnd.toString(), recordDays,
-                stageInfoOf(p, stage, stageEnd), total, avg, underCount, underDays,
+                stageInfoOf(p, stage, stageEnd), total, avg, underCount, underDays, goal,
                 inProgress, progressOf(target));
     }
 
@@ -337,7 +337,7 @@ public class WearServiceImpl implements WearService {
     private ConsultSummaryVO stageNoRecord(String p, com.chiji.entity.Stage stage, LocalDate stageEnd,
                                            com.chiji.entity.Aligner target, boolean inProgress) {
         return new ConsultSummaryVO(p, ConsultSummaryVO.STATE_STAGE_NO_RECORD, true,
-                null, null, 0, stageInfoOf(p, stage, stageEnd), 0, 0, 0, List.of(),
+                null, null, 0, stageInfoOf(p, stage, stageEnd), 0, 0, 0, List.of(), 0,
                 inProgress, progressOf(target));
     }
 
