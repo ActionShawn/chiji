@@ -75,8 +75,12 @@ public class ChewQueryServiceImpl implements ChewQueryService {
             }
         }
 
+        // 进行中实时净时长并入展示值：active 净时长封顶 ACTIVE_DISPLAY_CAP_SEC（7200s），
+        // 防忘结束的挂机会话把「今日累计」虚高至荒谬值（展示口径防御，不截断会话、不落库；
+        // 跨天 stale 会话不剔除、不按天切分，同样受此上限约束，由前端跨天确认引导用户结束/丢弃）
         ChewSession running = findRunning(userId);
-        long activeNet = running == null ? 0L : ChewMath.netSec(running, now);
+        long activeNet = running == null ? 0L
+                : Math.min(ChewMath.netSec(running, now), ChewConstants.ACTIVE_DISPLAY_CAP_SEC);
         ChewSessionVO activeVO = running == null ? null : ChewVos.toVO(running, now, labelOf(running));
 
         return new TodayChewVO(

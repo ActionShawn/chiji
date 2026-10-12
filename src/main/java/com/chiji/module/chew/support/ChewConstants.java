@@ -26,6 +26,12 @@ public final class ChewConstants {
     /** 有效净时长下限（秒）：结束时会话净时长 < 此值视为误触，不落库。 */
     public static final int MIN_VALID_NET_SEC = 5;
 
+    /**
+     * active 会话净时长展示上限（秒）= 2 小时：忘结束的 active 会话在「今日累计」中按净时长实时累计，
+     * 无上限可被挂机虚高至荒谬值；此处仅约束展示统计口径（today.netSec），不截断会话自身倒计时、不落库。
+     */
+    public static final int ACTIVE_DISPLAY_CAP_SEC = 7200;
+
     /** 统计口径：近 7 天（含今天）。 */
     public static final String RANGE_LAST_7 = "LAST_7";
 

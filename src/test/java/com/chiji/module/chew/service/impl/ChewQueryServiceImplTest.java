@@ -37,7 +37,7 @@ import static org.mockito.Mockito.when;
 /**
  * 咬胶只读查询口径测试。
  * <p>
- * 覆盖 today（已结束合计 + 进行中实时并入 + reachedCount）、calendar（整月逐日 0 填充平行数组）、
+ * 覆盖 today（已结束合计 + 进行中实时并入封顶 7200s + reachedCount）、calendar（整月逐日 0 填充平行数组）、
  * day（仅已结束 + 归属标签）、stats（range 规整/区间/聚合/非法值）、active（无进行中返回 null）。
  */
 @ExtendWith(MockitoExtension.class)
@@ -138,6 +138,58 @@ class ChewQueryServiceImplTest {
         assertEquals(0, vo.reachedCount());
         assertEquals(ChewConstants.GOAL_SEC, vo.goal());
         assertNull(vo.active());
+    }
+
+    // ── today：active 净时长展示封顶（防挂机膨胀，仅展示口径，不动会话自身 netSec）──
+
+    @Test
+    void today_active_net_capped_at_display_cap() {
+        // 挂机防御：进行中净时长（3h）超 7200s，今日累计展示值中 active 贡献封顶
+        LocalDate today = ChewTimes.today();
+        ChewSession running = session(2L, ChewTimes.now().minusSeconds(10800), null, null, 0, 600);
+        when(chewSessionMapper.sumNetSecByDay(any(), any(), any())).thenReturn(List.of(row(today, 300L)));
+        when(chewSessionMapper.countByDay(any(), any(), any())).thenReturn(List.of());
+        when(chewSessionMapper.listOfDay(any(), any(), any())).thenReturn(List.of());
+        when(chewSessionMapper.selectOne(any())).thenReturn(running);
+
+        TodayChewVO vo = service.today(USER_ID);
+
+        assertEquals(300L, vo.endedNetSec());
+        // 300 + min(3h, 7200) = 300 + 7200，不随真实挂机时长膨胀
+        assertEquals(300L + ChewConstants.ACTIVE_DISPLAY_CAP_SEC, vo.netSec());
+    }
+
+    @Test
+    void today_active_net_at_cap_boundary_not_capped() {
+        // 边界：恰好 2 小时（min(7200, 7200) = 7200）不截断
+        LocalDate today = ChewTimes.today();
+        ChewSession running = session(2L, ChewTimes.now().minusSeconds(7200), null, null, 0, 600);
+        when(chewSessionMapper.sumNetSecByDay(any(), any(), any())).thenReturn(List.of(row(today, 400L)));
+        when(chewSessionMapper.countByDay(any(), any(), any())).thenReturn(List.of());
+        when(chewSessionMapper.listOfDay(any(), any(), any())).thenReturn(List.of());
+        when(chewSessionMapper.selectOne(any())).thenReturn(running);
+
+        TodayChewVO vo = service.today(USER_ID);
+
+        // 整秒向下取整：active 贡献 ∈ [7199, 7200]，不超上限
+        assertTrue(vo.netSec() >= 400L + 7199L && vo.netSec() <= 400L + ChewConstants.ACTIVE_DISPLAY_CAP_SEC);
+    }
+
+    @Test
+    void today_cross_day_stale_active_capped_but_active_vo_not_capped() {
+        // 跨天 stale（昨天开始一直没结束）：today 展示贡献封顶 7200（不剔除、不按天切分）；
+        // active VO 自身 netSec 为倒计时口径，保持真实值不封顶
+        ChewSession running = session(2L, ChewTimes.now().minusHours(26), null, null, 0, 600);
+        when(chewSessionMapper.sumNetSecByDay(any(), any(), any())).thenReturn(List.of());
+        when(chewSessionMapper.countByDay(any(), any(), any())).thenReturn(List.of());
+        when(chewSessionMapper.listOfDay(any(), any(), any())).thenReturn(List.of());
+        when(chewSessionMapper.selectOne(any())).thenReturn(running);
+
+        TodayChewVO vo = service.today(USER_ID);
+
+        assertEquals(ChewConstants.ACTIVE_DISPLAY_CAP_SEC, vo.netSec());
+        assertNotNull(vo.active());
+        assertTrue(vo.active().netSec() > ChewConstants.ACTIVE_DISPLAY_CAP_SEC);
     }
 
     // ── calendar ───────────────────────────────────────────────────
