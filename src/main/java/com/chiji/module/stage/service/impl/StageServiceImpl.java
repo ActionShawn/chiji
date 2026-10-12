@@ -151,6 +151,10 @@ public class StageServiceImpl implements StageService {
             throw new BusinessException(ErrorCode.BAD_REQUEST, "起始副需在 1-" + totalNodes + " 之间");
         }
 
+        // 捕获更新前的开始日期：reconcile 据此判断用户是否显式修改了开始日期
+        // （未修改时保持各副既有排期，不把真实佩戴历史重排为理论值）
+        LocalDate previousStartDate = stage.getStartDate();
+
         stage.setName(request.name());
         stage.setCount(request.count());
         stage.setDaysPerAligner(dual ? null : request.days());
@@ -159,8 +163,8 @@ public class StageServiceImpl implements StageService {
         stage.setStartDate(parseStartDate(request.startDate()));
         stageMapper.updateById(stage);
 
-        // 对齐节点：补/删副、状态重排、统一排期（缩量时尾部有记录会抛业务异常回滚）
-        alignerService.reconcileAligners(stage, startNum);
+        // 对齐节点：补/删副、状态重排、排期（缩量/回退时尾部有记录会抛业务异常回滚）
+        alignerService.reconcileAligners(stage, startNum, previousStartDate);
 
         log.info("编辑阶段成功, userId={}, stageId={}, count={}, startNum={}, hasStartDate={}",
                 userId, stageId, request.count(), startNum, stage.getStartDate() != null);

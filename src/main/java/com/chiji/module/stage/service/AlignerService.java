@@ -46,14 +46,23 @@ public interface AlignerService {
      * <ul>
      *   <li>副数增加：尾部补齐新的 FUTURE 节点（双模按软奇硬偶补 filmType）</li>
      *   <li>副数减少：删除超出的尾节点；若这些节点已存在佩戴会话或时光轴印记则拒绝（防止误删有数据的副）</li>
+     *   <li>回退保护：起始副调小时其后的副将被置回 FUTURE，任一该副已有佩戴会话或时光轴印记则拒绝</li>
      *   <li>状态对齐：num &lt; startNum 置 DONE、num == startNum 置 ACTIVE（currentDay=1）、之后 FUTURE</li>
-     *   <li>排期：有 startDate 时当前副向后顺延、前序副向前倒推；无 startDate 时清空全部计划日期</li>
+     *   <li>排期（不破坏真实佩戴历史）：
+     *     <ul>
+     *       <li>用户显式修改了开始日期（新值 ≠ {@code previousStartDate}）→ 当前副从新日期起顺延</li>
+     *       <li>未修改开始日期 → 当前副保持既有 startDate（不破坏佩戴天数动态推算），后续副从其 endDate 顺延</li>
+     *       <li>前序 DONE 副的日期一律保持不动；用户显式清空开始日期时仅清当前副及之后的排期</li>
+     *     </ul>
+     *   </li>
+     *   <li>起始副迁移且存在归属旧 ACTIVE 副的佩戴中会话时，收口旧会话并为新起始副另起会话（与换副拆分同语义）</li>
      * </ul>
      *
-     * @param stage    已更新字段的阶段实体
-     * @param startNum 当前起始副序号（1-based，须在 [1, 总节点数] 内）
+     * @param stage             已更新字段的阶段实体
+     * @param startNum          当前起始副序号（1-based，须在 [1, 总节点数] 内）
+     * @param previousStartDate 更新前的阶段开始日期（用于判断用户是否显式修改了开始日期）
      */
-    void reconcileAligners(Stage stage, int startNum);
+    void reconcileAligners(Stage stage, int startNum, LocalDate previousStartDate);
 
     /**
      * 手动结束当前副并开始下一副。
