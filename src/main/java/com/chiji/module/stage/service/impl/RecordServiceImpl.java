@@ -179,6 +179,42 @@ public class RecordServiceImpl implements RecordService {
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
+    public RecordVO updateRecord(Long userId, Long recordId, CreateRecordRequest req) {
+        // 1. 校验记录存在与归属
+        TimelineRecord record = timelineRecordMapper.selectById(recordId);
+        if (record == null) {
+            throw new BusinessException(ErrorCode.RECORD_NOT_FOUND);
+        }
+        if (!userId.equals(record.getUserId())) {
+            throw new BusinessException(ErrorCode.FORBIDDEN, "无权修改该记录");
+        }
+
+        // 2. 计算媒体类型汇总并更新正文（阶段/牙套副保持原值不变）
+        List<MediaItem> medias = req.medias() != null ? req.medias() : Collections.emptyList();
+        RecordKindEnum mediaKind = computeMediaKind(medias);
+        record.setText(req.text());
+        record.setWearHours(req.wearHours());
+        record.setMediaKind(mediaKind.getCode());
+        timelineRecordMapper.updateById(record);
+
+        // 3. 重建标签关联：先清空旧关联（联合主键无逻辑删除，物理删除），再按新标签关联
+        jdbcTemplate.update("DELETE FROM record_tag_relation WHERE record_id = ?", recordId);
+        List<String> tagNames = req.tags() != null ? req.tags() : Collections.emptyList();
+        saveTags(userId, recordId, tagNames);
+
+        // 4. 重建媒体：@TableLogic 逻辑删除旧媒体，再写入新媒体
+        recordMediaMapper.delete(new LambdaQueryWrapper<RecordMedia>()
+                .eq(RecordMedia::getRecordId, recordId));
+        saveMedias(recordId, medias);
+
+        log.info("记录已更新, userId={}, recordId={}, mediaKind={}", userId, recordId, mediaKind.getCode());
+
+        // 5. 复用列表转 VO（重新读取标签与媒体），返回最新数据
+        return toVOList(List.of(record)).get(0);
+    }
+
+    @Override
     public void deleteRecord(Long userId, Long recordId) {
         // selectById 受 @TableLogic 约束，已删除记录查不到，返回「记录不存在」
         TimelineRecord record = timelineRecordMapper.selectById(recordId);

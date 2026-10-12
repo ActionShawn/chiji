@@ -84,6 +84,23 @@ public class RecordController {
     }
 
     /**
+     * 更新一条记录。
+     * <p>
+     * 支持修改正文、标签与媒体；阶段与牙套副保持原值不变。
+     *
+     * @param id      记录 ID
+     * @param request 更新请求（复用创建请求结构）
+     * @return 更新后的记录 VO
+     */
+    @Operation(summary = "更新记录", description = "修改正文/标签/媒体，仅允许修改自己的记录")
+    @PutMapping("/{id}")
+    public R<RecordVO> updateRecord(@PathVariable Long id, @Valid @RequestBody CreateRecordRequest request) {
+        Long userId = SecurityUtil.getCurrentUserId();
+        RecordVO vo = recordService.updateRecord(userId, id, request);
+        return R.ok(vo, "记录已更新");
+    }
+
+    /**
      * 删除一条记录（逻辑删除）。
      *
      * @param id 记录 ID

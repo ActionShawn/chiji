@@ -68,6 +68,19 @@ public interface RecordService {
     RecordVO getRecord(Long userId, Long recordId);
 
     /**
+     * 更新一条记录。
+     * <p>
+     * 校验记录归属，仅允许修改自己的记录；支持修改正文、标签与媒体，
+     * 阶段与牙套副保持原值不变。
+     *
+     * @param userId   当前用户 ID
+     * @param recordId 记录 ID
+     * @param request  更新请求（复用创建请求结构）
+     * @return 更新后的记录 VO
+     */
+    RecordVO updateRecord(Long userId, Long recordId, CreateRecordRequest request);
+
+    /**
      * 删除一条记录（逻辑删除）。
      * <p>
      * 校验记录归属，仅允许删除自己的记录；使用 {@code deleted=1} 逻辑删除，数据可恢复。
