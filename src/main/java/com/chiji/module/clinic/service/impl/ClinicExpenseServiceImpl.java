@@ -125,11 +125,17 @@ public class ClinicExpenseServiceImpl implements ClinicExpenseService {
                                 : 0d))
                 .toList();
 
-        // 近 12 个月趋势（含当月，升序）
+        // 趋势窗口：首条数据所在月 ~ 当月（不足 TREND_MONTHS 个月则至少回看 TREND_MONTHS 月），升序补零
         YearMonth current = YearMonth.from(WearTimes.today());
+        YearMonth trendStart = current.minusMonths(TREND_MONTHS - 1L);
+        YearMonth earliest = all.stream()
+                .map(e -> YearMonth.from(e.getExpenseDate()))
+                .min(Comparator.naturalOrder())
+                .orElse(trendStart);
+        YearMonth start = earliest.isBefore(trendStart) ? earliest : trendStart;
         Map<String, BigDecimal> monthlyMap = new LinkedHashMap<>();
-        for (int i = TREND_MONTHS - 1; i >= 0; i--) {
-            monthlyMap.put(current.minusMonths(i).format(MONTH_FMT), BigDecimal.ZERO);
+        for (YearMonth ym = start; !ym.isAfter(current); ym = ym.plusMonths(1)) {
+            monthlyMap.put(ym.format(MONTH_FMT), BigDecimal.ZERO);
         }
         for (ClinicExpense e : all) {
             String key = YearMonth.from(e.getExpenseDate()).format(MONTH_FMT);

@@ -10,7 +10,7 @@ import java.util.List;
  *
  * @param total      累计总花费（元）
  * @param byCategory 分类占比（按金额降序；pct 为 0~100 一位小数）
- * @param monthly    近 12 个月趋势（升序，含当月；无数据月金额为 0）
+ * @param monthly    全量月度趋势（首条数据月 ~ 当月，至少近 12 个月；升序含当月，无数据月金额为 0）
  */
 @Schema(description = "花费统计")
 public record ExpenseStatsVO(
