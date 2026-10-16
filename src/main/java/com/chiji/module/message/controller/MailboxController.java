@@ -54,7 +54,7 @@ public class MailboxController {
     @GetMapping("/unread-count")
     public R<UnreadVO> unreadCount() {
         Long userId = SecurityUtil.getCurrentUserId();
-        return R.ok(new UnreadVO(messageService.countUnread(userId)));
+        return R.ok(new UnreadVO((int) messageService.countUnread(userId)));
     }
 
     @Operation(summary = "标记单条已读")

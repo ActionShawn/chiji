@@ -143,8 +143,10 @@ public class FeedbackController {
      */
     @Operation(summary = "反馈未读数", description = "运营在用户已读之后的新评论数")
     @GetMapping("/unread")
-    public R<Long> unread() {
+    public R<Integer> unread() {
         Long userId = SecurityUtil.getCurrentUserId();
-        return R.ok(feedbackService.unreadCount(userId));
+        // 计数必为小整数：必须用 Integer 返回，全局 Jackson 把 Long 序列化为字符串，
+        // 前端 typeof === 'number' 判定会挂（意见反馈红点不亮的根因）
+        return R.ok((int) feedbackService.unreadCount(userId));
     }
 }

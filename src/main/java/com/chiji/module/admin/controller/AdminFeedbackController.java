@@ -139,7 +139,9 @@ public class AdminFeedbackController {
      */
     @Operation(summary = "反馈未读数", description = "未读的新反馈首条 + 用户新评论")
     @GetMapping("/unread")
-    public R<Long> unread() {
-        return R.ok(adminFeedbackService.unreadCount());
+    public R<Integer> unread() {
+        // 计数必为小整数：必须用 Integer 返回，全局 Jackson 把 Long 序列化为字符串，
+        // 前端 typeof === 'number' 判定会挂（管理后台红点不亮的根因）
+        return R.ok((int) adminFeedbackService.unreadCount());
     }
 }
