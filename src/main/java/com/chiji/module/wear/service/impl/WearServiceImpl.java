@@ -41,6 +41,7 @@ import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.YearMonth;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -553,26 +554,42 @@ public class WearServiceImpl implements WearService {
     // ── 统计 / 汇总 ─────────────────────────────────────────
 
     @Override
-    public WearStatsVO stats(Long userId, String range) {
+    public WearStatsVO stats(Long userId, String range, String ym) {
         LocalDateTime now = WearTimes.now();
         LocalDate today = now.toLocalDate();
-        // 三种口径：LAST_7（周档）/ CURRENT_MONTH（月档，自然月 1 号→今天）/ LAST_30（兼容旧调用）
+        // 三种口径：LAST_7（周档）/ CURRENT_MONTH（月档）/ LAST_30（兼容旧调用）
+        // 月档可传 ym=yyyy-MM 查指定月：缺省=当月（1 号→今天）；历史月=1 号→月末；未来月拒绝
         String normalized;
         LocalDate from;
+        LocalDate to;
         if ("CURRENT_MONTH".equalsIgnoreCase(range)) {
             normalized = "CURRENT_MONTH";
-            from = today.withDayOfMonth(1);
+            if (ym == null || ym.isBlank()) {
+                from = today.withDayOfMonth(1);
+                to = today;
+            } else {
+                YearMonth month = parseMonth(ym);
+                if (month.isAfter(YearMonth.from(today))) {
+                    throw new BusinessException(ErrorCode.WEAR_PARAM_INVALID, "不能查看未来月份");
+                }
+                from = month.atDay(1);
+                to = month.equals(YearMonth.from(today)) ? today : month.atEndOfMonth();
+            }
         } else if ("LAST_30".equalsIgnoreCase(range)) {
             normalized = "LAST_30";
             from = today.minusDays(29);
+            to = today;
         } else if ("LAST_7".equalsIgnoreCase(range) || range == null || range.isBlank()) {
             normalized = "LAST_7";
             from = today.minusDays(6);
+            to = today;
         } else {
             throw new BusinessException(ErrorCode.WEAR_PARAM_INVALID, "统计范围应为 LAST_7 / CURRENT_MONTH / LAST_30");
         }
-        List<WearSession> sessions = sessionsOverlapping(userId, WearTimes.startOf(from), now);
-        Map<LocalDate, WearDayMath.DaySecs> dayMap = WearDayMath.distribute(sessions, from, today, now);
+        // 查询上界：截至今天取当前时刻（进行中会话计入），历史月取整月闭区间
+        LocalDateTime upper = to.equals(today) ? now : WearTimes.endOf(to);
+        List<WearSession> sessions = sessionsOverlapping(userId, WearTimes.startOf(from), upper);
+        Map<LocalDate, WearDayMath.DaySecs> dayMap = WearDayMath.distribute(sessions, from, to, now);
 
         int goal = goalSec(userId);
         int full = 0;
@@ -584,7 +601,7 @@ public class WearServiceImpl implements WearService {
         List<Long> secs = new ArrayList<>();
         LocalDate bestDate = null;
         long bestSec = 0;
-        for (LocalDate d = from; !d.isAfter(today); d = d.plusDays(1)) {
+        for (LocalDate d = from; !d.isAfter(to); d = d.plusDays(1)) {
             WearDayMath.DaySecs ds = WearDayMath.dayOrZero(dayMap, d);
             int s = (int) Math.min(Integer.MAX_VALUE, ds.wear());
             dates.add(d.toString());
@@ -615,6 +632,15 @@ public class WearServiceImpl implements WearService {
                 bestDate == null ? null : bestDate.toString(),
                 bestSec == 0 ? null : bestSec
         );
+    }
+
+    /** yyyy-MM → YearMonth（非法格式统一参数错误） */
+    private YearMonth parseMonth(String ym) {
+        try {
+            return YearMonth.parse(ym.trim());
+        } catch (DateTimeParseException e) {
+            throw new BusinessException(ErrorCode.WEAR_PARAM_INVALID, "月份格式应为 yyyy-MM");
+        }
     }
 
     @Override

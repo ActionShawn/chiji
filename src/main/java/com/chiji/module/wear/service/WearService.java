@@ -101,10 +101,11 @@ public interface WearService {
      * 佩戴统计（含今天；口径见 range）。
      *
      * @param userId 用户 ID
-     * @param range  LAST_7（近 7 天）/ CURRENT_MONTH（自然月 1 号→今天）/ LAST_30（近 30 天）
+     * @param range  LAST_7（近 7 天）/ CURRENT_MONTH（月档）/ LAST_30（近 30 天）
+     * @param ym     月档指定查看月 yyyy-MM：缺省=当月（1 号→今天），历史月=整月，未来月拒绝；非月档忽略
      * @return 统计视图
      */
-    WearStatsVO stats(Long userId, String range);
+    WearStatsVO stats(Long userId, String range, String ym);
 
     /**
      * 某副牙套的佩戴汇总（换副历史 / 阶段详情）。
