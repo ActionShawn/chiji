@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.chiji.common.core.dto.DayValueRow;
 import com.chiji.common.core.dto.LabelValueRow;
 import com.chiji.entity.User;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -55,4 +56,20 @@ public interface UserMapper extends BaseMapper<User> {
             + "FROM user WHERE created_at >= #{start} AND created_at < #{end} AND deleted = 0 "
             + "GROUP BY label")
     List<LabelValueRow> countNewUsersByMonth(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
+
+    /**
+     * 物理删除用户行（账号注销专用）。
+     * <p>
+     * 必须用原生 SQL 而非 {@code deleteById()}：{@link User} 带 {@code @TableLogic} 且全局配置
+     * {@code logic-delete-field: deleted}，MyBatis-Plus 生成的删除会退化成
+     * {@code UPDATE user SET deleted = 1}。逻辑删除会保留 {@code uk_user_openid} 唯一键槽位，
+     * 导致同一微信再次登录时 {@code selectOne(openid)} 被 {@code deleted = 0} 过滤查不到 → 走 insert
+     * → 撞唯一键 → {@link org.springframework.dao.DuplicateKeyException}。
+     * 物理删除后 openid 槽位释放，同一微信重登得到全新空账号。
+     *
+     * @param id 用户 ID
+     * @return 影响行数：1 删除成功；0 该行已不存在（幂等）
+     */
+    @Delete("DELETE FROM user WHERE id = #{id}")
+    int deletePhysicallyById(@Param("id") Long id);
 }
