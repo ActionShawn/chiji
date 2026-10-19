@@ -31,6 +31,17 @@ public interface FileStorageStrategy {
     String type();
 
     /**
+     * 按可访问 url 反解并删除目标介质上的文件。
+     * <p>
+     * 供账号注销在事务提交后异步真删上传文件（库中 {@code record_media.url} 即
+     * {@code baseUrl + "/" + relative}，反解安全）。URL 不属于本介质（前缀不匹配）时应
+     * <b>记日志后静默跳过</b>、不抛异常；删除失败亦不向上抛（注销已提交，不可回退）。
+     *
+     * @param url 可访问地址（如 {@code http://host/uploads/123/2026/10/19/xxx.jpg}）
+     */
+    void delete(String url);
+
+    /**
      * 生成客户端直传所需的 PUT 预签名信息。
      * <p>
      * 云托管场景下 callContainer 不适合传输文件，小程序改为直传对象存储：

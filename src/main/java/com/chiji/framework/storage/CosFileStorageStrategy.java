@@ -83,6 +83,36 @@ public class CosFileStorageStrategy implements FileStorageStrategy {
     }
 
     @Override
+    public void delete(String url) {
+        if (!StringUtils.hasText(url)) {
+            return;
+        }
+        CosStorageProperties cos = props.getCos();
+        if (!StringUtils.hasText(cos.getBaseUrl())) {
+            log.warn("COS baseUrl 未配置，跳过删除, url={}", url);
+            return;
+        }
+        String prefix = cos.getBaseUrl().endsWith("/") ? cos.getBaseUrl() : cos.getBaseUrl() + "/";
+        if (!url.startsWith(prefix)) {
+            // URL 不属于本介质（如已切换到本地存储），记日志后静默跳过，不抛异常
+            log.warn("URL 不属于 COS 介质，跳过删除, url={}", url);
+            return;
+        }
+        String objectKey = url.substring(prefix.length());
+        if (!StringUtils.hasText(objectKey)) {
+            log.warn("COS 对象 key 为空，跳过删除, url={}", url);
+            return;
+        }
+        try {
+            client().deleteObject(cos.getBucket(), objectKey);
+            log.info("COS 对象已删除, objectKey={}", objectKey);
+        } catch (Exception e) {
+            // 未配置 / 网络异常等：只记 warn，绝不影响已完成的注销
+            log.warn("COS 对象删除失败, objectKey={}", objectKey, e);
+        }
+    }
+
+    @Override
     public Optional<DirectUpload> presign(String relativePath, String contentType) {
         CosStorageProperties cos = props.getCos();
         Date expiration = new Date(System.currentTimeMillis() + PRESIGN_EXPIRATION_MILLIS);
