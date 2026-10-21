@@ -80,4 +80,15 @@ public interface ClinicVisitService {
      * @return 最近记录；无则 null
      */
     ClinicVisitVO lastVisit(Long userId);
+
+    /**
+     * 下一次复诊日期（固定托槽首页「距下次复诊 Y 天」数据源，BE-FB-09）。
+     * <p>
+     * 口径：该用户最早一条 PLANNED 且 visit_date ≥ 今日的日程；无则返回 null
+     * （今日复诊返回今日，前端按「今天复诊」渲染）。
+     *
+     * @param userId 用户 ID
+     * @return 下次复诊日期；无待复诊日程为 null
+     */
+    LocalDate nextVisitDate(Long userId);
 }

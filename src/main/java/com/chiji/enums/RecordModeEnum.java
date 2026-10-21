@@ -13,7 +13,9 @@ public enum RecordModeEnum {
     /** 隐形单模版：每副佩戴周期固定，到期直接换下一副 */
     CLEAR_SINGLE("CLEAR_SINGLE", "隐形单模版"),
     /** 隐形双模板：每组先戴软膜（初步移动）再换同序号硬膜（强力推动），软硬天数可分别设置 */
-    CLEAR_DUAL("CLEAR_DUAL", "隐形双模板");
+    CLEAR_DUAL("CLEAR_DUAL", "隐形双模板"),
+    /** 固定托槽：仅作为阶段壳（无 aligner/换副概念），复诊调整/疼痛等记录归属其下（第 1 批，REQ-FB-003） */
+    FIXED_BRACKET("FIXED_BRACKET", "固定托槽");
 
     /** 模式编码（落库到 stage.mode，与枚举 name() 一致） */
     private final String code;

@@ -38,12 +38,18 @@ public interface RecordService {
     List<RecordVO> listByAligner(Long userId, Long alignerId);
 
     /**
-     * 查询用户全部记录。
+     * 查询用户全部记录（显式传 mode 时按阶段归属的模式过滤，REQ-FB-008 / 评审 3.1）。
+     * <p>
+     * 过滤规则：记录归属 stage 的 mode（归一化后）等于传入模式才可见；
+     * stageId 无映射的孤儿记录兜底保留可见（评审 3.3 雷 2，存量隐形用户零变化红线优先）。
+     * <b>mode 缺省（null/空串）不过滤、现状全量返回</b>：旧客户端（未升级期间）不传 mode，
+     * 若缺省归一 CLEAR_SINGLE 会导致双模用户时光轴丢失双模阶段记录（兼容矩阵场景 1 回归）。
      *
      * @param userId 当前用户 ID
+     * @param mode   当前记录模式编码（可空；缺省不过滤）
      * @return 记录列表（按记录日期倒序）
      */
-    List<RecordVO> listByUser(Long userId);
+    List<RecordVO> listByUser(Long userId, String mode);
 
     /**
      * 查询某阶段下的记录列表。

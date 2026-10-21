@@ -64,6 +64,17 @@ public class StageServiceImpl implements StageService {
         if (mode == null) {
             mode = RecordModeEnum.CLEAR_SINGLE;
         }
+
+        // 固定托槽分支（REQ-FB-003）：仅阶段壳（名称 + 可选开始日期），count/days 全部忽略，
+        // 不创建任何 aligner、不走 startAlignerNum 校验（固定模式无副推进概念，评审红线：零触碰 reconcile）
+        if (mode == RecordModeEnum.FIXED_BRACKET) {
+            return createFixedStage(userId, request, mode);
+        }
+
+        // ── 隐形路径（行为与迁移前逐字段等价；count 校验由 DTO @NotNull 迁移至服务层，BE-FB-03）──
+        if (request.count() == null) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "总副数不能为空");
+        }
         // 按模式校验天数：单模要 days，双模要 softDays/hardDays（品牌周期不同，由用户按医嘱填写）
         if (mode.isDual()) {
             if (request.softDays() == null || request.hardDays() == null) {
@@ -108,6 +119,29 @@ public class StageServiceImpl implements StageService {
         return toStageVO(stage);
     }
 
+    /**
+     * 创建固定托槽阶段（REQ-FB-003）：仅名称（+可选开始日期），不落 count/days，不初始化 aligner。
+     */
+    private StageVO createFixedStage(Long userId, CreateStageRequest request, RecordModeEnum mode) {
+        // 同一时间至多一个启用阶段（固定模式独立一套，按模式隔离）
+        endActiveStages(userId, mode.getCode());
+
+        Integer maxSort = stageMapper.selectMaxSortOrder(userId);
+        int sortOrder = (maxSort == null ? 0 : maxSort + 1);
+
+        Stage stage = new Stage();
+        stage.setUserId(userId);
+        stage.setMode(mode.getCode());
+        stage.setName(request.name());
+        stage.setStartDate(parseStartDate(request.startDate()));
+        stage.setStatus(StageStatusEnum.ACTIVE.getCode());
+        stage.setSortOrder(sortOrder);
+        stageMapper.insert(stage);
+
+        log.info("创建固定托槽阶段成功, userId={}, stageId={}, name={}", userId, stage.getId(), stage.getName());
+        return toStageVO(stage);
+    }
+
     @Override
     public List<AlignerNodeVO> getStageAligners(Long userId, Long stageId) {
         // 校验阶段归属，防止越权查看他人阶段
@@ -134,7 +168,20 @@ public class StageServiceImpl implements StageService {
     public StageDetailVO updateStage(Long userId, Long stageId, UpdateStageRequest request) {
         Stage stage = loadOwnedStage(userId, stageId);
 
+        // 固定托槽阶段（REQ-FB-003）：仅更新名称与开始日期，count/days 忽略、不触碰 aligner（无 reconcile）
+        if (StageModeSupport.isFixed(stage)) {
+            stage.setName(request.name());
+            stage.setStartDate(parseStartDate(request.startDate()));
+            stageMapper.updateById(stage);
+            log.info("编辑固定托槽阶段成功, userId={}, stageId={}, name={}", userId, stageId, stage.getName());
+            return toStageDetailVO(stage);
+        }
+
+        // ── 隐形路径（行为与迁移前逐字段等价；count 校验由 DTO @NotNull 迁移至服务层，BE-FB-03）──
         // 记录模式创建后不可改，天数按阶段当前模式校验
+        if (request.count() == null) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "总副数不能为空");
+        }
         boolean dual = RecordModeEnum.CLEAR_DUAL.getCode().equals(stage.getMode());
         if (dual) {
             if (request.softDays() == null || request.hardDays() == null) {

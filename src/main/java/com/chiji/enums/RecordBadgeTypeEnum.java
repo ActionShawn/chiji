@@ -16,7 +16,11 @@ public enum RecordBadgeTypeEnum implements IEnum<String> {
     /** 里程碑 */
     MILESTONE("MILESTONE", "里程碑"),
     /** 阶段切换 */
-    STAGE_SWITCH("STAGE_SWITCH", "阶段切换");
+    STAGE_SWITCH("STAGE_SWITCH", "阶段切换"),
+    /** 疼痛记录（第 1 批仅固定托槽模式开放，REQ-FB-007） */
+    PAIN("PAIN", "疼痛记录"),
+    /** 复诊调整（复诊调整记录双写时光轴的联动徽标，REQ-FB-004） */
+    ADJUSTMENT("ADJUSTMENT", "复诊调整");
 
     /** 编码（与枚举 name() 一致） */
     private final String code;

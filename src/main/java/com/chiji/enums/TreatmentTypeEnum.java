@@ -6,7 +6,7 @@ package com.chiji.enums;
  * 齿迹面向所有牙齿矫正用户，目前支持三种治疗方式：
  * <ul>
  *   <li>{@link #CLEAR_ALIGNER} 隐形矫正：隐适美 / 时代天使 / 正雅（已开发）</li>
- *   <li>{@link #FIXED_BRACKET} 固定托槽矫正：传统金属 / 陶瓷 / 自锁（暂未开发）</li>
+ *   <li>{@link #FIXED_BRACKET} 固定托槽矫正：传统金属 / 陶瓷 / 自锁（第 1 批已开放，REQ-FB-001）</li>
  *   <li>{@link #LINGUAL} 舌侧矫正（暂未开发）</li>
  * </ul>
  *
@@ -20,8 +20,8 @@ public enum TreatmentTypeEnum {
     /** 隐形矫正：隐适美 / 时代天使 / 正雅（已开发，首页走 stage + aligner 节点轴） */
     CLEAR_ALIGNER("CLEAR_ALIGNER", "隐形矫正", "隐适美 / 时代天使 / 正雅", true),
 
-    /** 固定托槽矫正：传统金属 / 陶瓷 / 自锁（暂未开发） */
-    FIXED_BRACKET("FIXED_BRACKET", "固定托槽矫正", "传统金属 / 陶瓷 / 自锁", false),
+    /** 固定托槽矫正：传统金属 / 陶瓷 / 自锁（第 1 批开放，REQ-FB-001） */
+    FIXED_BRACKET("FIXED_BRACKET", "固定托槽矫正", "传统金属 / 陶瓷 / 自锁", true),
 
     /** 舌侧矫正（暂未开发） */
     LINGUAL("LINGUAL", "舌侧矫正", "舌侧隐形矫治器", false);

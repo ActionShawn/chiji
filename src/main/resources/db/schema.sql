@@ -28,9 +28,9 @@ CREATE TABLE IF NOT EXISTS `stage` (
     `id`               BIGINT      NOT NULL COMMENT '主键（雪花算法生成）',
     `user_id`          BIGINT      NOT NULL COMMENT '所属用户 ID',
     `name`             VARCHAR(64) NOT NULL COMMENT '阶段名称（形如「第一阶段 · 主力矫正」）',
-    `count`            INT         NOT NULL COMMENT '总副数（双模为组数，每组 = 软膜 + 硬膜两副）',
+    `count`            INT         DEFAULT NULL COMMENT '总副数（双模为组数，每组 = 软膜 + 硬膜两副；固定托槽阶段为 null）',
     `days_per_aligner` INT         DEFAULT NULL COMMENT '每副佩戴天数（单模有值；双模为 null，改由软/硬膜天数决定）',
-    `mode`             VARCHAR(32) NOT NULL DEFAULT 'CLEAR_SINGLE' COMMENT '记录模式：RecordModeEnum.name()，CLEAR_SINGLE(单模)/CLEAR_DUAL(双模)，存量数据归入单模',
+    `mode`             VARCHAR(32) NOT NULL DEFAULT 'CLEAR_SINGLE' COMMENT '记录模式：RecordModeEnum.name()，CLEAR_SINGLE(单模)/CLEAR_DUAL(双模)/FIXED_BRACKET(固定托槽)，存量数据归入单模',
     `soft_days`        INT         DEFAULT NULL COMMENT '双模：软膜佩戴天数（每组前段，牙齿初步移动）',
     `hard_days`        INT         DEFAULT NULL COMMENT '双模：硬膜佩戴天数（每组后段，同序号力量更强）',
     `start_date`       DATE        DEFAULT NULL COMMENT '开始日期（可空）',
@@ -71,7 +71,9 @@ CREATE TABLE IF NOT EXISTS `timeline_record` (
     `text`        TEXT        NOT NULL COMMENT '记录正文（纯文本）',
     `record_date` DATE        NOT NULL COMMENT '记录日期',
     `wear_hours`  INT         DEFAULT NULL COMMENT '佩戴时长（小时，可空；有值则徽标显示「22h」）',
-    `badge_type`  VARCHAR(16) DEFAULT NULL COMMENT '特殊徽标：RecordBadgeTypeEnum.name()，FOLLOW_UP/MILESTONE/STAGE_SWITCH（与 wear_hours 互斥）',
+    `badge_type`  VARCHAR(16) DEFAULT NULL COMMENT '特殊徽标：RecordBadgeTypeEnum.name()，FOLLOW_UP/MILESTONE/STAGE_SWITCH/PAIN/ADJUSTMENT（与 wear_hours 互斥）',
+    `pain_score`  TINYINT     DEFAULT NULL COMMENT '疼痛程度 0-5（仅 PAIN 记录有值）',
+    `pain_part`   VARCHAR(128) DEFAULT NULL COMMENT '疼痛部位 JSON 数组（预设标签+自定义≤20字，仅 PAIN 记录有值）',
     `created_at`  DATETIME    NOT NULL COMMENT '创建时间',
     `updated_at`  DATETIME    NOT NULL COMMENT '更新时间',
     `deleted`     TINYINT(1)  NOT NULL DEFAULT 0 COMMENT '逻辑删除：0 正常 / 1 已删除',
@@ -80,6 +82,38 @@ CREATE TABLE IF NOT EXISTS `timeline_record` (
     KEY `idx_record_stage` (`stage_id`) COMMENT '按阶段查记录',
     KEY `idx_record_aligner` (`aligner_id`) COMMENT '按牙套副查记录'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='时光轴记录表';
+
+-- 复诊调整记录（固定托槽第 1 批，REQ-FB-004；与时光轴双写联动，详见 migration/20261021_add_fixed_bracket.sql）
+CREATE TABLE IF NOT EXISTS `adjustment_record` (
+    `id`                 BIGINT       NOT NULL COMMENT '主键（雪花算法生成）',
+    `user_id`            BIGINT       NOT NULL COMMENT '所属用户 ID',
+    `stage_id`           BIGINT       NOT NULL COMMENT '归属阶段壳（不触碰 aligner/reconcile）',
+    `timeline_record_id` BIGINT       NOT NULL COMMENT '联动时光轴记录 ID（同事务双写；双向删除联动走此列索引）',
+    `wire_no`            INT          DEFAULT NULL COMMENT '弓丝序号（正整数，可空）',
+    `contents`           VARCHAR(200) NOT NULL COMMENT '加力内容标签 JSON 数组（换弓丝/加力/调整皮筋钩/其他）',
+    `content_extra`      VARCHAR(200) DEFAULT NULL COMMENT '选「其他」时的自定义文本',
+    `adjust_date`        DATE         NOT NULL COMMENT '调整日期（≤今日，补记不限）',
+    `note`               VARCHAR(200) DEFAULT NULL COMMENT '备注',
+    `created_at`         DATETIME     NOT NULL COMMENT '创建时间',
+    `updated_at`         DATETIME     NOT NULL COMMENT '更新时间',
+    `deleted`            TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '逻辑删除：0 正常 / 1 已删除',
+    PRIMARY KEY (`id`),
+    KEY `idx_adj_user_date` (`user_id`, `adjust_date`) COMMENT '按用户取调整列表倒序',
+    KEY `idx_adj_tr` (`timeline_record_id`) COMMENT '时光轴删除联动反查'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='复诊调整记录表';
+
+-- 橡皮筋每日打卡（固定托槽第 1 批，REQ-FB-006；done 翻转、禁逻辑删除行，唯一键幂等兜底）
+CREATE TABLE IF NOT EXISTS `rubber_band_record` (
+    `id`          BIGINT     NOT NULL COMMENT '主键（雪花算法生成）',
+    `user_id`     BIGINT     NOT NULL COMMENT '所属用户 ID',
+    `record_date` DATE       NOT NULL COMMENT '打卡日（设备本地时区）',
+    `done`        TINYINT    NOT NULL DEFAULT 1 COMMENT '1 已打卡 / 0 已取消（翻转更新，禁逻辑删除行）',
+    `created_at`  DATETIME   NOT NULL COMMENT '创建时间',
+    `updated_at`  DATETIME   NOT NULL COMMENT '更新时间',
+    `deleted`     TINYINT(1) NOT NULL DEFAULT 0 COMMENT '逻辑删除标记仅规范兼容，业务恒 0',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_rb_user_date` (`user_id`, `record_date`) COMMENT '幂等兜底：同日仅一行'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='橡皮筋每日打卡表';
 
 -- 记录媒体
 CREATE TABLE IF NOT EXISTS `record_media` (
@@ -538,3 +572,19 @@ CREATE TABLE IF NOT EXISTS `user_cancel_reason` (
     `created_at`    DATETIME     NOT NULL COMMENT '注销时间',
     PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='注销原因匿名统计';
+
+-- 用户交流群二维码配置（单行）：config_key 唯一键锚定单行，读取方按空配置兜底、首次写入懒创建；
+-- image_url 为 https 二维码直链（COS，与照片既有链路一致），用户端实时展示；image_file_id 为云存储
+-- fileID 预留列（当前链路不写入）；迁移脚本见 db/migration/20261021_add_group_qrcode_config.sql
+CREATE TABLE IF NOT EXISTS `group_qrcode_config` (
+    `id`            BIGINT       NOT NULL COMMENT '主键（雪花算法生成）',
+    `config_key`    VARCHAR(32)  NOT NULL COMMENT '配置键（单行锚点，当前仅 GROUP_QRCODE=用户交流群二维码）',
+    `image_file_id` VARCHAR(128) DEFAULT NULL COMMENT '云存储 fileID（预留列：当前二维码走 COS https 直链，此列暂不写入）',
+    `image_url`     VARCHAR(512) NOT NULL COMMENT '二维码图片地址（https，COS 直链；用户端实时展示该地址）',
+    `updated_by`    BIGINT       NOT NULL COMMENT '最后更新管理员用户 ID',
+    `created_at`    DATETIME     NOT NULL COMMENT '创建时间',
+    `updated_at`    DATETIME     NOT NULL COMMENT '更新时间（即用户端展示的「更新于」时间）',
+    `deleted`       TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '逻辑删除：0 正常 / 1 已删除（单行配置业务恒 0）',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_group_qrcode_key` (`config_key`) COMMENT '单行配置：每个配置键至多一行'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户交流群二维码配置表（单行）';

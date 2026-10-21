@@ -8,7 +8,11 @@ import com.chiji.entity.RecordMedia;
 import com.chiji.entity.Stage;
 import com.chiji.entity.Tag;
 import com.chiji.entity.TimelineRecord;
+import com.chiji.entity.User;
+import com.chiji.enums.RecordBadgeTypeEnum;
 import com.chiji.enums.RecordKindEnum;
+import com.chiji.enums.RecordModeEnum;
+import com.chiji.module.auth.mapper.UserMapper;
 import com.chiji.module.stage.dto.CreateRecordRequest;
 import com.chiji.module.stage.dto.MediaItem;
 import com.chiji.module.stage.mapper.AlignerMapper;
@@ -17,8 +21,11 @@ import com.chiji.module.stage.mapper.StageMapper;
 import com.chiji.module.stage.mapper.TagMapper;
 import com.chiji.module.stage.mapper.TimelineRecordMapper;
 import com.chiji.module.stage.service.RecordService;
+import com.chiji.module.stage.support.TreatmentGateSupport;
 import com.chiji.module.stage.vo.MediaItemVO;
 import com.chiji.module.stage.vo.RecordVO;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -28,6 +35,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -47,11 +55,26 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class RecordServiceImpl implements RecordService {
 
+    private static final ObjectMapper JSON = new ObjectMapper();
+
+    /** 记录正文最短字数（与前端「至少 3 个字」口径一致）。 */
+    private static final int TEXT_MIN = 3;
+
+    /** 记录正文最长字数（疼痛记录备注同限）。 */
+    private static final int TEXT_MAX = 300;
+
+    /** 疼痛程度取值上限（0-5，REQ-FB-007）。 */
+    private static final int PAIN_SCORE_MAX = 5;
+
+    /** 疼痛部位单标签最长字数（预设标签+自定义 ≤20 字）。 */
+    private static final int PAIN_PART_MAX = 20;
+
     private final TimelineRecordMapper timelineRecordMapper;
     private final StageMapper stageMapper;
     private final AlignerMapper alignerMapper;
     private final TagMapper tagMapper;
     private final RecordMediaMapper recordMediaMapper;
+    private final UserMapper userMapper;
     private final JdbcTemplate jdbcTemplate;
 
     @Override
@@ -76,33 +99,73 @@ public class RecordServiceImpl implements RecordService {
             }
         }
 
-        // 3. 计算媒体类型汇总（无媒体=TEXT，全图=IMAGE，全视频=VIDEO，混合=MIXED）
+        // 3. 疼痛记录判定与校验（REQ-FB-007：painScore/painPart 任一携带即判定为疼痛记录）
+        boolean isPain = isPainRequest(req);
+        Integer painScore = null;
+        List<String> painPart = null;
+        String text = req.text();
+        if (isPain) {
+            // 第 2 批回补放开点：若疼痛开放给隐形用户，仅需调整本处门控调用
+            User user = userMapper.selectById(userId);
+            if (user == null) {
+                throw new BusinessException(ErrorCode.USER_NOT_FOUND);
+            }
+            TreatmentGateSupport.assertFixedBracket(user.getTreatmentType());
+            painScore = assertPainFields(req);
+            painPart = normalizePainPart(req.painPart());
+            // 互斥：疼痛记录禁传佩戴时长（badge 与 wearHours 同构互斥）
+            if (req.wearHours() != null) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "疼痛记录不支持同时记录佩戴时长");
+            }
+            // 正文（备注）可空；空时派生中性摘要供时光轴 snippet 兜底
+            if (text == null || text.isBlank()) {
+                text = buildPainSummary(painScore, painPart);
+            } else {
+                assertTextLength(text);
+            }
+        } else {
+            // 普通记录：与原 DTO @NotBlank/@Size 等价的强校验（隐形路径行为不变，BE-FB-06）
+            if (text == null || text.isBlank()) {
+                throw new BusinessException(ErrorCode.RECORD_TEXT_REQUIRED);
+            }
+            if (text.length() < TEXT_MIN) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "正文3-300字");
+            }
+            assertTextLength(text);
+        }
+
+        // 4. 计算媒体类型汇总（无媒体=TEXT，全图=IMAGE，全视频=VIDEO，混合=MIXED）
         List<MediaItem> medias = req.medias() != null ? req.medias() : Collections.emptyList();
         RecordKindEnum mediaKind = computeMediaKind(medias);
 
-        // 4. 构建记录实体
+        // 5. 构建记录实体
         TimelineRecord record = new TimelineRecord();
         record.setUserId(userId);
         record.setStageId(req.stageId());
         record.setAlignerId(alignerId);
-        record.setText(req.text());
+        record.setText(text);
         record.setRecordDate(LocalDate.now());
         record.setWearHours(req.wearHours());
         record.setMediaKind(mediaKind.getCode());
-        // badgeType 首期由标签语义推断，暂不开放直接设置
+        if (isPain) {
+            record.setBadgeType(RecordBadgeTypeEnum.PAIN.getCode());
+            record.setPainScore(painScore);
+            record.setPainPart(toJsonArray(painPart));
+        }
+        // 其余 badgeType（FOLLOW_UP/MILESTONE/STAGE_SWITCH）由对应链路写入，本接口不开放设置
 
         timelineRecordMapper.insert(record);
-        log.info("记录已保存, userId={}, recordId={}, stageId={}, alignerId={}, mediaKind={}",
-                userId, record.getId(), req.stageId(), alignerId, mediaKind.getCode());
+        log.info("记录已保存, userId={}, recordId={}, stageId={}, alignerId={}, mediaKind={}, isPain={}",
+                userId, record.getId(), req.stageId(), alignerId, mediaKind.getCode(), isPain);
 
-        // 5. 处理标签：查找/创建并关联，返回去重后的标签名列表供 VO 展示
+        // 6. 处理标签：查找/创建并关联，返回去重后的标签名列表供 VO 展示
         List<String> tagNames = req.tags() != null ? req.tags() : Collections.emptyList();
         List<String> savedTagNames = saveTags(userId, record.getId(), tagNames);
 
-        // 6. 保存媒体（写入 record_media，独立 id 主键，BaseMapper.insert 自动填充审计字段）
+        // 7. 保存媒体（写入 record_media，独立 id 主键，BaseMapper.insert 自动填充审计字段）
         List<MediaItemVO> mediaVOs = saveMedias(record.getId(), medias);
 
-        // 7. 返回 VO
+        // 8. 返回 VO
         return RecordVO.builder()
                 .id(record.getId())
                 .stageId(record.getStageId())
@@ -115,6 +178,8 @@ public class RecordServiceImpl implements RecordService {
                 .createdAt(record.getCreatedAt())
                 .wearHours(record.getWearHours())
                 .badgeType(record.getBadgeType())
+                .painScore(record.getPainScore())
+                .painPart(painPart)
                 .tags(savedTagNames)
                 .medias(mediaVOs)
                 .mediaUrls(mediaVOs.stream().map(MediaItemVO::getUrl).toList())
@@ -141,12 +206,43 @@ public class RecordServiceImpl implements RecordService {
     }
 
     @Override
-    public List<RecordVO> listByUser(Long userId) {
+    public List<RecordVO> listByUser(Long userId, String mode) {
+        // 查询该用户全部记录（现状查询不动）
         List<TimelineRecord> records = timelineRecordMapper.selectList(
                 new LambdaQueryWrapper<TimelineRecord>()
                         .eq(TimelineRecord::getUserId, userId)
                         .orderByDesc(TimelineRecord::getRecordDate));
-        return toVOList(records);
+
+        // mode 缺省（null/空串）= 旧客户端路径：不过滤，现状全量返回（存量零变化红线——
+        // 若缺省归一 CLEAR_SINGLE，双模用户旧客户端的全量时光轴会丢失双模阶段记录）
+        if (mode == null || mode.isBlank()) {
+            return toVOList(records);
+        }
+
+        // 显式传 mode：归一（未知编码按 CLEAR_SINGLE，与 HomeServiceImpl 口径一致）后按 stage 归属过滤
+        RecordModeEnum modeEnum = RecordModeEnum.getByCode(mode);
+        String currentMode = modeEnum != null ? modeEnum.getCode() : RecordModeEnum.CLEAR_SINGLE.getCode();
+
+        // 该用户全部 stage 的 {id → mode} 映射（含已逻辑删除 stage：删阶段不删记录，
+        // 记录仍按阶段原 mode 归属过滤，评审 3.3 雷 1）
+        Map<Long, String> stageModeMap = new HashMap<>();
+        for (Stage s : stageMapper.selectAllModesByUserId(userId)) {
+            stageModeMap.put(s.getId(), normalizeMode(s.getMode()));
+        }
+
+        // 内存过滤（评审 3.1 方案 A）：stageId 无映射的孤儿记录兜底保留可见（评审 3.3 雷 2）
+        List<TimelineRecord> filtered = records.stream()
+                .filter(r -> r.getStageId() == null || !stageModeMap.containsKey(r.getStageId())
+                        || currentMode.equals(stageModeMap.get(r.getStageId())))
+                .toList();
+        return toVOList(filtered);
+    }
+
+    /**
+     * 归一化阶段的模式编码：null / 未知编码按 CLEAR_SINGLE（兼容存量数据，与 HomeServiceImpl 一致）。
+     */
+    private String normalizeMode(String stageMode) {
+        return RecordModeEnum.getByCode(stageMode) != null ? stageMode : RecordModeEnum.CLEAR_SINGLE.getCode();
     }
 
     @Override
@@ -190,20 +286,60 @@ public class RecordServiceImpl implements RecordService {
             throw new BusinessException(ErrorCode.FORBIDDEN, "无权修改该记录");
         }
 
-        // 2. 计算媒体类型汇总并更新正文（阶段/牙套副保持原值不变）
+        // 2. 疼痛判定与校验（与 createRecord 同口径）
+        boolean isPain = isPainRequest(req);
+        Integer painScore = null;
+        List<String> painPart = null;
+        String text = req.text();
+        if (isPain) {
+            // 第 2 批回补放开点：若疼痛开放给隐形用户，仅需调整本处门控调用
+            User user = userMapper.selectById(userId);
+            if (user == null) {
+                throw new BusinessException(ErrorCode.USER_NOT_FOUND);
+            }
+            TreatmentGateSupport.assertFixedBracket(user.getTreatmentType());
+            painScore = assertPainFields(req);
+            painPart = normalizePainPart(req.painPart());
+            if (req.wearHours() != null) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "疼痛记录不支持同时记录佩戴时长");
+            }
+            if (text == null || text.isBlank()) {
+                text = buildPainSummary(painScore, painPart);
+            } else {
+                assertTextLength(text);
+            }
+        } else {
+            if (text == null || text.isBlank()) {
+                throw new BusinessException(ErrorCode.RECORD_TEXT_REQUIRED);
+            }
+            if (text.length() < TEXT_MIN) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "正文3-300字");
+            }
+            assertTextLength(text);
+        }
+
+        // 3. 计算媒体类型汇总并更新正文（阶段/牙套副保持原值不变）
         List<MediaItem> medias = req.medias() != null ? req.medias() : Collections.emptyList();
         RecordKindEnum mediaKind = computeMediaKind(medias);
-        record.setText(req.text());
+        record.setText(text);
         record.setWearHours(req.wearHours());
         record.setMediaKind(mediaKind.getCode());
+        record.setPainScore(painScore);
+        record.setPainPart(painPart != null ? toJsonArray(painPart) : null);
+        // 徽标：编辑为疼痛 → PAIN；由疼痛改回普通 → 清除 PAIN 徽标；其余徽标（里程碑等）保持不变
+        if (isPain) {
+            record.setBadgeType(RecordBadgeTypeEnum.PAIN.getCode());
+        } else if (RecordBadgeTypeEnum.PAIN.getCode().equals(record.getBadgeType())) {
+            record.setBadgeType(null);
+        }
         timelineRecordMapper.updateById(record);
 
-        // 3. 重建标签关联：先清空旧关联（联合主键无逻辑删除，物理删除），再按新标签关联
+        // 4. 重建标签关联：先清空旧关联（联合主键无逻辑删除，物理删除），再按新标签关联
         jdbcTemplate.update("DELETE FROM record_tag_relation WHERE record_id = ?", recordId);
         List<String> tagNames = req.tags() != null ? req.tags() : Collections.emptyList();
         saveTags(userId, recordId, tagNames);
 
-        // 4. 重建媒体：@TableLogic 逻辑删除旧媒体，再写入新媒体
+        // 5. 重建媒体：@TableLogic 逻辑删除旧媒体，再写入新媒体
         recordMediaMapper.delete(new LambdaQueryWrapper<RecordMedia>()
                 .eq(RecordMedia::getRecordId, recordId));
         saveMedias(recordId, medias);
@@ -215,6 +351,7 @@ public class RecordServiceImpl implements RecordService {
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void deleteRecord(Long userId, Long recordId) {
         // selectById 受 @TableLogic 约束，已删除记录查不到，返回「记录不存在」
         TimelineRecord record = timelineRecordMapper.selectById(recordId);
@@ -226,6 +363,15 @@ public class RecordServiceImpl implements RecordService {
         }
         // @TableLogic 逻辑删除：UPDATE deleted = 1，数据可恢复
         timelineRecordMapper.deleteById(recordId);
+        // 时光轴侧删联动：badge_type=ADJUSTMENT 的记录对应一条 adjustment_record，
+        // 由 AdjustmentRecordService 反查并逻辑删除（评审 4.1 双向删除链路）。
+        // 使用 jdbcTemplate 直查避免本类与 adjustment 模块循环依赖。
+        String badge = record.getBadgeType();
+        if (RecordBadgeTypeEnum.ADJUSTMENT.getCode().equals(badge)) {
+            jdbcTemplate.update("UPDATE adjustment_record SET deleted = 1, updated_at = NOW() "
+                    + "WHERE timeline_record_id = ? AND deleted = 0", recordId);
+            log.info("复诊调整记录随时光轴联动删除, userId={}, recordId={}", userId, recordId);
+        }
         log.info("记录已删除, userId={}, recordId={}", userId, recordId);
     }
 
@@ -349,6 +495,8 @@ public class RecordServiceImpl implements RecordService {
                 .createdAt(record.getCreatedAt())
                 .wearHours(record.getWearHours())
                 .badgeType(record.getBadgeType())
+                .painScore(record.getPainScore())
+                .painPart(fromJsonArray(record.getPainPart()))
                 .tags(tagNames)
                 .medias(medias)
                 .mediaUrls(medias.stream().map(MediaItemVO::getUrl).toList())
@@ -367,6 +515,104 @@ public class RecordServiceImpl implements RecordService {
         }
         List<Tag> tags = tagMapper.selectBatchIds(tagIds);
         return tags.stream().map(Tag::getName).toList();
+    }
+
+    // ─────────────────────── 疼痛记录相关（REQ-FB-007） ───────────────────────
+
+    /**
+     * 判定是否疼痛记录：painScore 或 painPart 任一携带即判定（BE-FB-06 口径）。
+     */
+    private boolean isPainRequest(CreateRecordRequest req) {
+        return req.painScore() != null
+                || (req.painPart() != null && !req.painPart().isEmpty());
+    }
+
+    /**
+     * 校验疼痛字段：评分必填且 0-5（REQ-FB-007「评分必填」+ 日常用语档位）。
+     *
+     * @return 校验通过的疼痛程度
+     */
+    private Integer assertPainFields(CreateRecordRequest req) {
+        Integer score = req.painScore();
+        if (score == null) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "请选择疼痛程度");
+        }
+        if (score < 0 || score > PAIN_SCORE_MAX) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "疼痛程度需在0-5之间");
+        }
+        return score;
+    }
+
+    /**
+     * 归一化疼痛部位标签：trim、去空项、去重（保留首次出现顺序）、单标签 ≤20 字。
+     */
+    private List<String> normalizePainPart(List<String> painPart) {
+        if (painPart == null || painPart.isEmpty()) {
+            return Collections.emptyList();
+        }
+        LinkedHashSet<String> deduped = new LinkedHashSet<>();
+        for (String part : painPart) {
+            String trimmed = part == null ? "" : part.trim();
+            if (trimmed.isEmpty()) {
+                continue;
+            }
+            if (trimmed.length() > PAIN_PART_MAX) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "部位标签最多20字");
+            }
+            deduped.add(trimmed);
+        }
+        return new ArrayList<>(deduped);
+    }
+
+    /**
+     * 疼痛记录正文派生摘要（备注为空时的时光轴 snippet 兜底，中性表述无诊断含义）。
+     * 形如「疼痛 3/5」或「疼痛 3/5 · 部位：上排、牙龈」。
+     */
+    private String buildPainSummary(Integer score, List<String> parts) {
+        StringBuilder sb = new StringBuilder("疼痛 ").append(score).append("/5");
+        if (parts != null && !parts.isEmpty()) {
+            sb.append(" · 部位：").append(String.join("、", parts));
+        }
+        return sb.toString();
+    }
+
+    /**
+     * 字符串列表 → JSON 数组字符串（空列表返回 null）。
+     */
+    private String toJsonArray(List<String> list) {
+        if (list == null || list.isEmpty()) {
+            return null;
+        }
+        try {
+            return JSON.writeValueAsString(list);
+        } catch (Exception e) {
+            throw new IllegalStateException("疼痛部位序列化失败", e);
+        }
+    }
+
+    /**
+     * JSON 数组字符串 → 字符串列表（解析失败返回 null，调用方按可空字段兜底渲染）。
+     */
+    private List<String> fromJsonArray(String json) {
+        if (json == null || json.isBlank()) {
+            return null;
+        }
+        try {
+            return JSON.readValue(json, new TypeReference<List<String>>() {
+            });
+        } catch (Exception e) {
+            log.warn("疼痛部位 JSON 解析失败, err={}", e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 正文长度上限校验（创建/更新共用；疼痛备注与普通正文同限 300 字）。
+     */
+    private void assertTextLength(String text) {
+        if (text.length() > TEXT_MAX) {
+            throw new BusinessException(ErrorCode.RECORD_TEXT_TOO_LONG);
+        }
     }
 
     // ─────────────────────── 媒体相关 ───────────────────────

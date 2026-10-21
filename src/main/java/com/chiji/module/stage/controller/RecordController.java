@@ -47,15 +47,18 @@ public class RecordController {
      * 查询记录列表。
      * <p>
      * 支持按阶段或按牙套副过滤；都不传时返回该用户全部记录。
+     * 显式传 mode 时按阶段归属模式过滤（REQ-FB-008）；缺省不过滤（旧客户端现状全量，存量零变化）。
      *
      * @param stageId   阶段 ID（可选，「查看全部」按当前阶段过滤）
      * @param alignerId 牙套副 ID（可选）
+     * @param mode      记录模式编码（可选；显式传入时按阶段归属模式过滤，缺省不过滤）
      * @return 记录列表（按记录日期倒序）
      */
-    @Operation(summary = "查询记录列表", description = "可按阶段/牙套副过滤，都不传则查全部，按日期倒序")
+    @Operation(summary = "查询记录列表", description = "可按阶段/牙套副过滤，都不传则查全部；显式传 mode 时按模式过滤")
     @GetMapping
     public R<List<RecordVO>> listRecords(@RequestParam(required = false) Long stageId,
-                                         @RequestParam(required = false) Long alignerId) {
+                                         @RequestParam(required = false) Long alignerId,
+                                         @RequestParam(required = false) String mode) {
         Long userId = SecurityUtil.getCurrentUserId();
         List<RecordVO> records;
         if (stageId != null) {
@@ -63,7 +66,7 @@ public class RecordController {
         } else if (alignerId != null) {
             records = recordService.listByAligner(userId, alignerId);
         } else {
-            records = recordService.listByUser(userId);
+            records = recordService.listByUser(userId, mode);
         }
         return R.ok(records);
     }

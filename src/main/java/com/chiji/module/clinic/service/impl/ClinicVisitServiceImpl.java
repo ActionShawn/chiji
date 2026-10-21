@@ -308,6 +308,19 @@ public class ClinicVisitServiceImpl implements ClinicVisitService {
         return visit == null ? null : toVO(visit, Collections.emptyList());
     }
 
+    @Override
+    public LocalDate nextVisitDate(Long userId) {
+        // 口径：最早一条 PLANNED 且 visit_date ≥ 今日（今日复诊返回今日，前端渲染「今天复诊」）
+        ClinicVisit visit = visitMapper.selectOne(new LambdaQueryWrapper<ClinicVisit>()
+                .eq(ClinicVisit::getUserId, userId)
+                .eq(ClinicVisit::getStatus, ClinicVisitStatusEnum.PLANNED.name())
+                .ge(ClinicVisit::getVisitDate, LocalDate.now())
+                .orderByAsc(ClinicVisit::getVisitDate)
+                .orderByAsc(ClinicVisit::getId)
+                .last("LIMIT 1"));
+        return visit == null ? null : visit.getVisitDate();
+    }
+
     // ───────────────────────── 私有辅助 ─────────────────────────
 
     /** 创建时快照 ACTIVE 阶段与当前副（可空；仅展示用，不随阶段变化回写）。 */

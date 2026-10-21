@@ -49,6 +49,12 @@ public class RecordVO {
     /** 特殊徽标类型（可空） */
     private final String badgeType;
 
+    /** 疼痛程度 0-5（仅 PAIN 记录有值，REQ-FB-007） */
+    private final Integer painScore;
+
+    /** 疼痛部位标签列表（仅 PAIN 记录有值，落库 JSON 反序列化后返回；解析失败为 null） */
+    private final List<String> painPart;
+
     /** 标签名列表（如 ["换牙套", "小进步"]） */
     private final List<String> tags;
 

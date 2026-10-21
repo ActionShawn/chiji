@@ -5,6 +5,11 @@ import com.chiji.entity.Stage;
 import com.chiji.enums.AlignerFilmEnum;
 import com.chiji.enums.RecordModeEnum;
 
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.Locale;
+
 /**
  * 记录模式支撑工具：双模模式下的天数回退与序号换算。
  * <p>
@@ -16,6 +21,9 @@ import com.chiji.enums.RecordModeEnum;
  * </ul>
  */
 public final class StageModeSupport {
+
+    /** 「开始日期 yyyy.MM.dd」格式（buildStageMeta 固定分支与 HomeServiceImpl.START_FMT 保持一致）。 */
+    private static final DateTimeFormatter START_FMT = DateTimeFormatter.ofPattern("yyyy.MM.dd", Locale.CHINA);
 
     private StageModeSupport() {
     }
@@ -49,6 +57,13 @@ public final class StageModeSupport {
     }
 
     /**
+     * 阶段是否固定托槽模式（仅阶段壳，无 aligner / 换副概念）。
+     */
+    public static boolean isFixed(Stage stage) {
+        return stage != null && RecordModeEnum.FIXED_BRACKET.getCode().equals(stage.getMode());
+    }
+
+    /**
      * 节点序号换算组号：双模 num 连续递增（软奇硬偶），组号 = ceil(num / 2)；单模组号 = num。
      */
     public static int resolveGroupNum(Stage stage, int num) {
@@ -68,11 +83,17 @@ public final class StageModeSupport {
     /**
      * 阶段 meta 元信息文案（StageServiceImpl 与 HomeServiceImpl 共用，保证两处一致）：
      * <ul>
+     *   <li>固定托槽：「{yyyy.MM.dd} 开始」（T0 终裁，无副数/天数推算；开始日期缺失回退创建日期）</li>
      *   <li>单模：「{count}副 · 每副{days}天 · 约{count*days}天」</li>
      *   <li>双模：「{count}组 · 软{soft}天 · 硬{hard}天 · 约{count*(soft+hard)}天」</li>
      * </ul>
      */
     public static String buildStageMeta(Stage stage) {
+        if (isFixed(stage)) {
+            LocalDate date = stage.getStartDate() != null ? stage.getStartDate()
+                    : (stage.getCreatedAt() != null ? stage.getCreatedAt().toLocalDate() : null);
+            return date != null ? date.format(START_FMT) + " 开始" : "已开始";
+        }
         if (isDual(stage)) {
             int soft = stage.getSoftDays() != null ? stage.getSoftDays() : 0;
             int hard = stage.getHardDays() != null ? stage.getHardDays() : 0;
