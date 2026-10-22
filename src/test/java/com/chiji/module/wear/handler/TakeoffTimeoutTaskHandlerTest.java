@@ -81,6 +81,20 @@ class TakeoffTimeoutTaskHandlerTest {
     }
 
     @Test
+    void fence_fixed_bracket_user_skips_pending_task_without_consuming_quota() {
+        // 固定托槽围栏（矫正方式切换前遗留的 pending 任务）：按 treatment_type 跳过，
+        // 不预扣额度、不下发、不重试（记 last_error）
+        when(wearService.isFixedBracketUser(USER_ID)).thenReturn(true);
+
+        DelayTaskSkipException e = assertThrows(DelayTaskSkipException.class,
+                () -> handler.execute(task(PAYLOAD)));
+        assertTrue(e.getMessage().contains("固定托槽"));
+        verify(wearService, never()).isTakeoffSessionOpen(anyLong(), anyLong());
+        verify(subscribeQuotaService, never()).consumeIfAvailable(anyLong(), anyString());
+        verify(takeoffNotifyService, never()).sendAndArchive(any());
+    }
+
+    @Test
     void no_daily_quota_skips_without_notify() {
         // 当日无可用额度：预扣 false → skip（预扣模型不回补，也不下发）
         when(wearService.isTakeoffSessionOpen(USER_ID, SESSION_ID)).thenReturn(true);

@@ -6,6 +6,7 @@ import com.chiji.entity.Stage;
 import com.chiji.entity.UserSetting;
 import com.chiji.entity.WearSession;
 import com.chiji.enums.WearSourceEnum;
+import com.chiji.module.auth.mapper.UserMapper;
 import com.chiji.module.delay.service.DelayTaskService;
 import com.chiji.module.message.service.NotificationSettingService;
 import com.chiji.module.message.service.ReminderNotifyService;
@@ -77,6 +78,8 @@ class ConsultSummaryTest {
     private DelayTaskService delayTaskService;
     @Mock
     private NotificationSettingService notificationSettingService;
+    @Mock
+    private UserMapper userMapper;
 
     private WearServiceImpl service;
 
@@ -84,7 +87,7 @@ class ConsultSummaryTest {
     void setUp() {
         service = new WearServiceImpl(wearSessionMapper, wearSessionEditLogMapper, wearDailySummaryMapper,
                 wearUserSettingMapper, wearSettleService, alignerService, reminderNotifyService,
-                delayTaskService, notificationSettingService);
+                delayTaskService, notificationSettingService, userMapper);
     }
 
     private void stubSetting(LocalDateTime updatedAt) {
