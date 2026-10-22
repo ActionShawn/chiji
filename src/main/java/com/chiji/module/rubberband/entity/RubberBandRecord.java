@@ -14,12 +14,13 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 /**
- * 橡皮筋每日打卡实体（固定托槽第 1 批，REQ-FB-006）。
+ * 橡皮筋每日打卡实体（固定托槽第 1 批 REQ-FB-006 → 第 2 批 OPT-FB-04 次数计数）。
  * <p>
  * 唯一键 {@code uk_rb_user_date(user_id, record_date)} 不含 deleted：业务层
- * <b>done 翻转、禁逻辑删除行</b>（评审红线 R7——若对行做逻辑删除，唯一键槽位仍被占用，
- * 同日再打卡 INSERT 会撞唯一键）。取消打卡 = done 0↔1 翻转更新；
- * toggle 走 {@code INSERT ... ON DUPLICATE KEY UPDATE done = VALUES(done)} 幂等兜底。
+ * <b>禁逻辑删除行</b>（评审红线 R7——若对行做逻辑删除，唯一键槽位仍被占用，
+ * 同日再计数 INSERT 会撞唯一键）。第 2 批 done 语义升级为 count：
+ * increment 走 {@code INSERT ... ON DUPLICATE KEY UPDATE count = count + 1} 原子累加；
+ * done 列冻结废弃（迁移回填 count=done，仅回滚兜底，业务读写全部走 count）。
  */
 @Getter
 @Setter
@@ -34,10 +35,13 @@ public class RubberBandRecord {
     /** 所属用户 ID（唯一键 uk_rb_user_date 前缀） */
     private Long userId;
 
-    /** 打卡日（设备本地时区口径；第 1 批仅当日，服务端取 now，不接受前端传日期） */
+    /** 打卡日（设备本地时区口径；仅当日，服务端取 now，不接受前端传日期） */
     private LocalDate recordDate;
 
-    /** 1 已打卡 / 0 已取消（翻转更新，禁逻辑删除行） */
+    /** 当日累计更换次数（OPT-FB-04：done 语义升级，≥1 即当日打卡；写入路径唯一事实） */
+    private Integer count;
+
+    /** 第 1 批勾选语义（冻结废弃：仅迁移回填与回滚兜底，业务不再读写） */
     private Integer done;
 
     /** 创建时间，插入时自动填充 */

@@ -5,6 +5,8 @@ import com.chiji.common.core.exception.BusinessException;
 import com.chiji.common.core.exception.ErrorCode;
 import com.chiji.entity.ClinicExpense;
 import com.chiji.entity.ClinicExpenseCategory;
+import com.chiji.entity.User;
+import com.chiji.module.auth.mapper.UserMapper;
 import com.chiji.module.clinic.dto.ExpenseSaveRequest;
 import com.chiji.module.clinic.mapper.ClinicExpenseCategoryMapper;
 import com.chiji.module.clinic.mapper.ClinicExpenseMapper;
@@ -33,6 +35,9 @@ import java.util.Map;
  * <p>
  * 统计聚合在内存完成（个人流水量级小，避免维护聚合 XML）；
  * 金额一律 BigDecimal 两位小数；分类名解析一次查全量转 Map。
+ * <p>
+ * 第 2 批 OPT-FB-03：分类名解析（花费列表/统计）同样按用户模式过滤内置行
+ * （mode IS NULL OR mode = 用户模式）——固定专属分类不混入隐形用户（评审风险 R1）。
  */
 @Slf4j
 @Service
@@ -45,6 +50,7 @@ public class ClinicExpenseServiceImpl implements ClinicExpenseService {
 
     private final ClinicExpenseMapper expenseMapper;
     private final ClinicExpenseCategoryMapper categoryMapper;
+    private final UserMapper userMapper;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -184,15 +190,29 @@ public class ClinicExpenseServiceImpl implements ClinicExpenseService {
         return expense;
     }
 
-    /** 全部分类（内置 + 本人）ID → 名称映射。 */
+    /** 全部分类（内置 + 本人）ID → 名称映射；内置行按用户模式过滤（OPT-FB-03，评审风险 R1）。 */
     private Map<Long, String> categoryNameMap(Long userId) {
-        List<ClinicExpenseCategory> rows = categoryMapper.selectList(new LambdaQueryWrapper<ClinicExpenseCategory>()
+        String userMode = currentUserMode(userId);
+        LambdaQueryWrapper<ClinicExpenseCategory> wrapper = new LambdaQueryWrapper<ClinicExpenseCategory>()
                 .and(w -> w.eq(ClinicExpenseCategory::getUserId, 0L)
-                        .or().eq(ClinicExpenseCategory::getUserId, userId)));
+                        .or().eq(ClinicExpenseCategory::getUserId, userId));
+        if (userMode == null) {
+            wrapper.and(w -> w.isNull(ClinicExpenseCategory::getMode));
+        } else {
+            wrapper.and(w -> w.isNull(ClinicExpenseCategory::getMode)
+                    .or().eq(ClinicExpenseCategory::getMode, userMode));
+        }
+        List<ClinicExpenseCategory> rows = categoryMapper.selectList(wrapper);
         Map<Long, String> map = new LinkedHashMap<>();
         for (ClinicExpenseCategory c : rows) {
             map.putIfAbsent(c.getId(), c.getName());
         }
         return map;
+    }
+
+    /** 当前用户治疗方式编码（查不到用户返回 null → 仅通用内置行参与解析，等价隐形存量行为）。 */
+    private String currentUserMode(Long userId) {
+        User user = userMapper.selectById(userId);
+        return user == null ? null : user.getTreatmentType();
     }
 }

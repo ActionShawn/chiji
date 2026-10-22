@@ -28,6 +28,7 @@ import com.chiji.module.stage.mapper.AlignerMapper;
 import com.chiji.module.stage.mapper.RecordMediaMapper;
 import com.chiji.module.stage.mapper.StageMapper;
 import com.chiji.module.stage.mapper.TimelineRecordMapper;
+import com.chiji.module.stage.support.TreatmentGateSupport;
 import com.chiji.enums.AlignerStateEnum;
 import com.chiji.enums.StageStatusEnum;
 import com.chiji.entity.Aligner;
@@ -65,8 +66,10 @@ public class ClinicVisitServiceImpl implements ClinicVisitService {
     private static final DateTimeFormatter MONTH_FMT = DateTimeFormatter.ofPattern("yyyy-MM");
     /** 默认就诊内容文案（用户未填写时） */
     private static final String DEFAULT_CONTENT = "完成复诊";
-    /** 一键带出复诊费的内置分类名 */
+    /** 一键带出复诊费的内置分类名（隐形模式） */
     private static final String BUILTIN_EXPENSE_NAME = "复诊费";
+    /** 一键带出复诊费的内置分类名（固定托槽模式映射「复诊挂号」，OPT-FB-03 验收项） */
+    private static final String BUILTIN_EXPENSE_NAME_FIXED = "复诊挂号";
     /** 单次补录媒体上限（对齐时光轴记录约束） */
     private static final int MEDIA_MAX = 9;
 
@@ -344,7 +347,11 @@ public class ClinicVisitServiceImpl implements ClinicVisitService {
         }
     }
 
-    /** 一键带出复诊费的分类解析：指定 ID 须合法，否则取内置「复诊费」；无内置时取「其他」。 */
+    /**
+     * 一键带出复诊费的分类解析：指定 ID 须合法，否则取内置「复诊费」；无内置时取「其他」。
+     * OPT-FB-03：固定托槽用户映射内置「复诊挂号」（隐形用户取「复诊费」存量行为零变化），
+     * 模式判定走 TreatmentGateSupport 唯一事实源。
+     */
     private Long resolveExpenseCategoryId(Long userId, Long requestedId) {
         if (requestedId != null) {
             ClinicExpenseCategory c = categoryMapper.selectById(requestedId);
@@ -352,9 +359,11 @@ public class ClinicVisitServiceImpl implements ClinicVisitService {
                 return requestedId;
             }
         }
+        String builtinName = TreatmentGateSupport.isFixedBracket(currentTreatmentType(userId))
+                ? BUILTIN_EXPENSE_NAME_FIXED : BUILTIN_EXPENSE_NAME;
         ClinicExpenseCategory builtin = categoryMapper.selectOne(new LambdaQueryWrapper<ClinicExpenseCategory>()
                 .eq(ClinicExpenseCategory::getUserId, 0L)
-                .eq(ClinicExpenseCategory::getName, BUILTIN_EXPENSE_NAME));
+                .eq(ClinicExpenseCategory::getName, builtinName));
         if (builtin != null) {
             return builtin.getId();
         }

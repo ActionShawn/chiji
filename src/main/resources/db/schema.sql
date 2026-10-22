@@ -102,12 +102,14 @@ CREATE TABLE IF NOT EXISTS `adjustment_record` (
     KEY `idx_adj_tr` (`timeline_record_id`) COMMENT '时光轴删除联动反查'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='复诊调整记录表';
 
--- 橡皮筋每日打卡（固定托槽第 1 批，REQ-FB-006；done 翻转、禁逻辑删除行，唯一键幂等兜底）
+-- 橡皮筋每日打卡（固定托槽第 1 批 REQ-FB-006；第 2 批 OPT-FB-04 count 次数语义：
+-- 禁逻辑删除行，唯一键幂等兜底；done 列冻结废弃仅回滚兜底，写入路径全部走 count）
 CREATE TABLE IF NOT EXISTS `rubber_band_record` (
     `id`          BIGINT     NOT NULL COMMENT '主键（雪花算法生成）',
     `user_id`     BIGINT     NOT NULL COMMENT '所属用户 ID',
     `record_date` DATE       NOT NULL COMMENT '打卡日（设备本地时区）',
-    `done`        TINYINT    NOT NULL DEFAULT 1 COMMENT '1 已打卡 / 0 已取消（翻转更新，禁逻辑删除行）',
+    `count`       INT        NOT NULL DEFAULT 0 COMMENT '当日累计更换次数（OPT-FB-04，done 语义升级；done 列冻结废弃，仅回滚兜底）',
+    `done`        TINYINT    NOT NULL DEFAULT 1 COMMENT '1 已打卡 / 0 已取消（第 1 批语义，冻结废弃：仅回滚兜底，业务不再读写）',
     `created_at`  DATETIME   NOT NULL COMMENT '创建时间',
     `updated_at`  DATETIME   NOT NULL COMMENT '更新时间',
     `deleted`     TINYINT(1) NOT NULL DEFAULT 0 COMMENT '逻辑删除标记仅规范兼容，业务恒 0',
@@ -259,11 +261,13 @@ CREATE TABLE IF NOT EXISTS `clinic_expense` (
     KEY `idx_clinic_expense_user_date` (`user_id`, `expense_date`) COMMENT '按用户取花费流水'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='矫正花费流水表';
 
--- 花费分类（user_id=0 为系统内置：牙套费/复诊费/保持器/洁牙/其他，照 tag 表模式）
+-- 花费分类（user_id=0 为系统内置：隐形五类 牙套费/复诊费/保持器/洁牙/其他 + 固定五类 托槽/弓丝更换/橡皮筋/复诊挂号/保持器，照 tag 表模式；
+-- mode 列承载模式分档（OPT-FB-03）：NULL 通用 / FIXED_BRACKET 固定专属，服务层按用户 treatment_type 过滤）
 CREATE TABLE IF NOT EXISTS `clinic_expense_category` (
-    `id`         BIGINT      NOT NULL COMMENT '主键（雪花算法生成）',
+    `id`         BIGINT      NOT NULL COMMENT '主键（雪花算法生成；内置分类取固定小整数段 3101~3110 避开雪花段）',
     `user_id`    BIGINT      NOT NULL COMMENT '所属用户 ID；0 = 系统内置预设',
     `name`       VARCHAR(32) NOT NULL COMMENT '分类名（同一用户下唯一）',
+    `mode`       VARCHAR(32) DEFAULT NULL COMMENT '分类适用模式：NULL 通用（隐形存量行）/ FIXED_BRACKET 固定托槽专属（OPT-FB-03）；服务层按用户 treatment_type 过滤',
     `sort_order` INT         NOT NULL DEFAULT 0 COMMENT '排序权重，越小越靠前',
     `created_at` DATETIME    NOT NULL COMMENT '创建时间',
     `updated_at` DATETIME    NOT NULL COMMENT '更新时间',
@@ -272,6 +276,8 @@ CREATE TABLE IF NOT EXISTS `clinic_expense_category` (
     UNIQUE KEY `uk_clinic_cat_user_name` (`user_id`, `name`) COMMENT '同一用户（含系统预设）下分类名唯一',
     KEY `idx_clinic_cat_user` (`user_id`, `sort_order`) COMMENT '按用户取分类列表'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='矫正花费分类表';
+
+-- 系统内置分类 seed（user_id=0；INSERT IGNORE 防重复执行；固定五类见 20261022_add_clinic_category_mode.sql）
 
 -- 首页常用工具配置（每用户一行；工具 key 有序列表，默认顺序由客户端字典承载）
 CREATE TABLE IF NOT EXISTS `user_tool_config` (

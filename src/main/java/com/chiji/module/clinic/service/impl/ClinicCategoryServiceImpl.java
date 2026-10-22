@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.chiji.common.core.exception.BusinessException;
 import com.chiji.common.core.exception.ErrorCode;
 import com.chiji.entity.ClinicExpenseCategory;
+import com.chiji.entity.User;
+import com.chiji.module.auth.mapper.UserMapper;
 import com.chiji.module.clinic.dto.CategoryCreateRequest;
 import com.chiji.module.clinic.dto.CategorySortRequest;
 import com.chiji.module.clinic.mapper.ClinicExpenseCategoryMapper;
@@ -25,6 +27,10 @@ import java.util.Set;
  * 内置分类（user_id=0）随 migration 预置，只在读取侧合并；名称唯一性含内置五类
  * （用户不能新建与内置同名的分类）。唯一键 {@code uk(user_id, name)} 不含 deleted，
  * 逻辑删行仍占键位，因此同名新建命中已删行时走「复活」而非新插入。
+ * <p>
+ * 第 2 批 OPT-FB-03：内置行带 mode 分档（NULL 通用 / FIXED_BRACKET 固定专属），
+ * 列表按用户 treatment_type 过滤（mode IS NULL OR mode = 用户模式）——
+ * 隐形用户分类列表与存量记账数据零变化（回归红线）。
  */
 @Slf4j
 @Service
@@ -37,15 +43,26 @@ public class ClinicCategoryServiceImpl implements ClinicCategoryService {
     private static final int USER_SORT_STEP = 10;
 
     private final ClinicExpenseCategoryMapper categoryMapper;
+    private final UserMapper userMapper;
 
     @Override
     public List<ClinicCategoryVO> list(Long userId) {
-        // @TableLogic 自动追加 deleted=0；内置排前（user_id 升序）+ sort_order 升序
-        List<ClinicExpenseCategory> rows = categoryMapper.selectList(new LambdaQueryWrapper<ClinicExpenseCategory>()
+        String userMode = currentUserMode(userId);
+        // @TableLogic 自动追加 deleted=0；内置排前（user_id 升序）+ sort_order 升序；
+        // 内置行按模式过滤：NULL 通用恒可见，FIXED_BRACKET 专属行仅固定用户可见（隐形回归红线）
+        LambdaQueryWrapper<ClinicExpenseCategory> wrapper = new LambdaQueryWrapper<ClinicExpenseCategory>()
                 .and(w -> w.eq(ClinicExpenseCategory::getUserId, 0L)
                         .or().eq(ClinicExpenseCategory::getUserId, userId))
+                .and(w -> {
+                    if (userMode == null) {
+                        w.isNull(ClinicExpenseCategory::getMode);
+                    } else {
+                        w.isNull(ClinicExpenseCategory::getMode).or().eq(ClinicExpenseCategory::getMode, userMode);
+                    }
+                })
                 .orderByAsc(ClinicExpenseCategory::getUserId)
-                .orderByAsc(ClinicExpenseCategory::getSortOrder));
+                .orderByAsc(ClinicExpenseCategory::getSortOrder);
+        List<ClinicExpenseCategory> rows = categoryMapper.selectList(wrapper);
         return rows.stream()
                 .map(c -> new ClinicCategoryVO(
                         c.getId(), c.getName(), c.getUserId() == 0L, c.getSortOrder()))
@@ -131,5 +148,14 @@ public class ClinicCategoryServiceImpl implements ClinicCategoryService {
                 .max(Comparator.naturalOrder())
                 .map(m -> m + USER_SORT_STEP)
                 .orElse(USER_SORT_BASE);
+    }
+
+    /**
+     * 当前用户治疗方式编码（OPT-FB-03 模式过滤唯一事实源 TreatmentGateSupport 的判定输入）。
+     * 查不到用户返回 null → 仅可见通用（mode IS NULL）内置行，等价隐形存量行为。
+     */
+    private String currentUserMode(Long userId) {
+        User user = userMapper.selectById(userId);
+        return user == null ? null : user.getTreatmentType();
     }
 }
