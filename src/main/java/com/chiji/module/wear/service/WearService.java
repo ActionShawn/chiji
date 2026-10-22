@@ -187,6 +187,18 @@ public interface WearService {
     boolean isTakeoffSessionOpen(Long userId, Long sessionId);
 
     /**
+     * 用户是否固定托槽矫正（{@code user.treatment_type = FIXED_BRACKET}，走
+     * {@code TreatmentGateSupport} 唯一判定源；用户不存在按非固定处理）。
+     * <p>
+     * 固定托槽无「摘下/戴回」概念：摘下超时任务投递与下发链路（handler 围栏，
+     * 覆盖切换矫正方式前遗留的 pending 任务）据此跳过。
+     *
+     * @param userId 用户 ID
+     * @return true = 固定托槽用户
+     */
+    boolean isFixedBracketUser(Long userId);
+
+    /**
      * 最近一条已收口（摘下）的佩戴会话 ID（BE-5 换副取消摘下超时任务时定位业务键用）。
      *
      * @param userId 用户 ID

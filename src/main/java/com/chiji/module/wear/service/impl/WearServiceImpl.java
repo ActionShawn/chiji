@@ -3,6 +3,7 @@ package com.chiji.module.wear.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.chiji.common.core.exception.BusinessException;
 import com.chiji.common.core.exception.ErrorCode;
+import com.chiji.entity.User;
 import com.chiji.entity.UserSetting;
 import com.chiji.entity.WearDailySummary;
 import com.chiji.entity.WearSession;
@@ -10,8 +11,10 @@ import com.chiji.entity.WearSessionEditLog;
 import com.chiji.enums.StageStatusEnum;
 import com.chiji.enums.WearReminderTypeEnum;
 import com.chiji.enums.WearSourceEnum;
+import com.chiji.module.auth.mapper.UserMapper;
 import com.chiji.module.message.service.ReminderNotifyService;
 import com.chiji.module.stage.service.AlignerService;
+import com.chiji.module.stage.support.TreatmentGateSupport;
 import com.chiji.module.wear.dto.WearMakeupRequest;
 import com.chiji.module.wear.dto.WearMorningBackfillRequest;
 import com.chiji.module.wear.dto.WearSessionEditRequest;
@@ -85,6 +88,7 @@ public class WearServiceImpl implements WearService {
     private final ReminderNotifyService reminderNotifyService;
     private final com.chiji.module.delay.service.DelayTaskService delayTaskService;
     private final com.chiji.module.message.service.NotificationSettingService notificationSettingService;
+    private final UserMapper userMapper;
 
     // ── 工作台 ──────────────────────────────────────────────
 
@@ -137,6 +141,12 @@ public class WearServiceImpl implements WearService {
      * 不在本事务内同步下发。
      */
     private void submitTakeoffTimeout(Long userId, Long sessionId) {
+        // 固定托槽围栏：无「摘下/戴回」概念，不投递摘下超时任务（punch 接口直调兜底，
+        // 正常固定用户前端无佩戴打卡入口）
+        if (isFixedBracketUser(userId)) {
+            log.info("固定托槽用户跳过摘下超时投递, userId={}, sessionId={}", userId, sessionId);
+            return;
+        }
         if (!notificationSettingService.isReminderAllowed(userId, WearReminderTypeEnum.TAKEOFF_TIMEOUT)) {
             log.info("摘下超时提醒未开启，跳过投递, userId={}, sessionId={}", userId, sessionId);
             return;
@@ -191,6 +201,12 @@ public class WearServiceImpl implements WearService {
                 .eq(WearSession::getUserId, userId)
                 .isNull(WearSession::getEndedAt));
         return openCount == null || openCount == 0;
+    }
+
+    @Override
+    public boolean isFixedBracketUser(Long userId) {
+        User user = userMapper.selectById(userId);
+        return user != null && TreatmentGateSupport.isFixedBracket(user.getTreatmentType());
     }
 
     @Override

@@ -25,6 +25,8 @@ import java.util.Map;
  * <p>
  * 执行链（每步失败即止）：
  * <ol>
+ *   <li>矫正方式围栏：用户已切换为固定托槽（{@link WearService#isFixedBracketUser}，
+ *       覆盖切换前遗留的 pending 任务）→ {@link DelayTaskSkipException}（记 last_error、不耗重试）；</li>
  *   <li>业务围栏：校验摘下状态未被戴回 / 换副打断（{@link WearService#isTakeoffSessionOpen}），
  *       否则 {@link DelayTaskSkipException}（记 last_error、不耗重试）；</li>
  *   <li>智能模式跨日重算（PRD 2026-10-08 修订：可摘下时间仅针对当日）——摘下事件跨零点延续到
@@ -94,6 +96,12 @@ public class TakeoffTimeoutTaskHandler implements DelayTaskHandler {
         String thing4 = payload.path("thing4").asText("");
         if (userId <= 0 || sessionId <= 0) {
             throw new DelayTaskSkipException("payload 缺少 userId/sessionId，跳过下发");
+        }
+
+        // ⓪ 矫正方式围栏：固定托槽无「摘下/戴回」概念 → 直接跳过（含切换矫正方式前
+        //    遗留的 pending 任务；记 last_error、不耗重试、不删任务数据）
+        if (wearService.isFixedBracketUser(userId)) {
+            throw new DelayTaskSkipException("用户已切换为固定托槽，跳过下发");
         }
 
         // ① 业务围栏：摘下状态未被戴回 / 换副打断（戴回与换副会按业务键取消本任务，此处兜底竞态）

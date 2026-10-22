@@ -91,6 +91,8 @@ public enum ErrorCode {
     WEAR_EDIT_FORBIDDEN(70009, "该佩戴记录不可编辑/删除"),
     /** 佩戴记录不存在（会话级编辑/删除时归属校验失败）。 */
     WEAR_SESSION_FORBIDDEN(70010, "无权编辑该佩戴记录"),
+    /** 固定托槽用户访问佩戴侧接口（无「摘戴打卡」语义，Controller 统一门控拦截）。 */
+    WEAR_FIXED_BRACKET_NOT_APPLICABLE(70011, "当前矫正方式无需佩戴打卡"),
     // 71000+ 咬胶计时模块
     /** 咬胶记录不存在（含非本人，不区分不泄露）。 */
     CHEW_SESSION_NOT_FOUND(71001, "咬胶记录不存在"),

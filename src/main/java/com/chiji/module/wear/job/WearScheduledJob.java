@@ -124,6 +124,12 @@ public class WearScheduledJob {
         int failed = 0;
         for (Long userId : userIds) {
             try {
+                // 固定托槽围栏：无「戴上」概念，不推送睡前佩戴提醒（遗留活跃 aligner 的
+                // 切换用户亦拦截；通知设置页佩戴组开关行对固定用户隐藏，此处是唯一救济口）
+                if (wearService.isFixedBracketUser(userId)) {
+                    skipped++;
+                    continue;
+                }
                 // 开关门控：总开关 + 睡前提醒类型开关
                 if (!notificationSettingService.isReminderAllowed(userId, WearReminderTypeEnum.WEAR_BEDTIME)) {
                     skipped++;

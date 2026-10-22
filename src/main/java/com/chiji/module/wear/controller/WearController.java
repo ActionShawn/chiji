@@ -39,6 +39,11 @@ import java.util.List;
  * <p>
  * 受 Sa-Token 保护，需携带 Authorization 请求头。覆盖「佩戴」页的打卡/撤销/补录/晨起补记、
  * 目标设置与统计，以及首页联动的副维度汇总。
+ * <p>
+ * 固定托槽门控：本控制器全部接口在方法首行统一经 {@link #assertWearableUser()} 拦截
+ * 固定托槽用户（无「摘戴打卡」语义，正常前端无入口，此处兜底接口直调），返回专用业务
+ * 错误码 {@code WEAR_FIXED_BRACKET_NOT_APPLICABLE}（HTTP 仍为 200，走统一 R 响应体）；
+ * 隐形用户判定 false 短路，行为零变化。
  */
 @Tag(name = "佩戴时长", description = "打卡/补录/目标/统计")
 @RestController
@@ -48,63 +53,86 @@ public class WearController {
 
     private final WearService wearService;
 
+    /**
+     * 固定托槽统一门控（Controller 级唯一拦截点，所有佩戴接口方法首行调用）。
+     * <p>
+     * 判定走 {@link WearService#isFixedBracketUser(Long)}（内部经
+     * {@code TreatmentGateSupport} 唯一事实源，mapper 访问留在 service 层满足 ArchUnit），
+     * 避免在业务代码散写 treatmentType 比较。固定托槽用户抛专用业务错误码，文案中性不区分对待。
+     */
+    private void assertWearableUser() {
+        if (wearService.isFixedBracketUser(SecurityUtil.getCurrentUserId())) {
+            throw new BusinessException(ErrorCode.WEAR_FIXED_BRACKET_NOT_APPLICABLE);
+        }
+    }
+
     @Operation(summary = "今日工作台", description = "实时佩戴量/达标档/佩戴中状态/时间线")
     @GetMapping("/today")
     public R<TodayWearVO> today() {
+        assertWearableUser();
         return R.ok(wearService.today(SecurityUtil.getCurrentUserId()));
     }
 
     @Operation(summary = "打卡", description = "body.action = WEAR_ON(戴上)/WEAR_OFF(摘下)；body.mode = 当前记录模式，用于会话归属当前阶段当前副")
     @PostMapping("/punch")
     public R<TodayWearVO> punch(@Valid @RequestBody WearPunchRequest request) {
+        assertWearableUser();
         return R.ok(wearService.punch(SecurityUtil.getCurrentUserId(), request.action(), request.mode()));
     }
 
     @Operation(summary = "撤销佩戴中会话", description = "误触戴上后回退当前佩戴中会话")
     @PostMapping("/active-session/cancel")
     public R<TodayWearVO> cancelActive() {
+        assertWearableUser();
         return R.ok(wearService.cancelActive(SecurityUtil.getCurrentUserId()));
     }
 
     @Operation(summary = "校准补录", description = "为最近 7 天的某自然日补录忘记打卡的时间段")
     @PostMapping("/makeup")
     public R<TodayWearVO> makeup(@Valid @RequestBody WearMakeupRequest request) {
+        assertWearableUser();
         return R.ok(wearService.makeup(SecurityUtil.getCurrentUserId(), request));
     }
 
     @Operation(summary = "晨起补记", description = "昨晚就戴上了今早补记（昨晚 date=昨天）")
     @PostMapping("/morning")
     public R<TodayWearVO> morning(@Valid @RequestBody WearMorningBackfillRequest request) {
+        assertWearableUser();
         return R.ok(wearService.morningBackfill(SecurityUtil.getCurrentUserId(), request));
     }
 
     @Operation(summary = "当日佩戴会话列表", description = "时长校准：查询某自然日所有会话（含跨夜裁剪段），按开始时间升序")
     @GetMapping("/sessions")
     public R<List<TodaySessionVO>> sessions(@RequestParam String date) {
+        assertWearableUser();
         return R.ok(wearService.sessions(SecurityUtil.getCurrentUserId(), parseDate(date)));
     }
 
     @Operation(summary = "编辑佩戴会话时间", description = "只改开始/结束时间，方向不限；MANUAL 编辑后打「修正」标；佩戴中仅可改开始")
     @PutMapping("/sessions/{id}")
     public R<TodayWearVO> updateSession(@PathVariable Long id, @Valid @RequestBody WearSessionEditRequest request) {
+        assertWearableUser();
         return R.ok(wearService.updateSession(SecurityUtil.getCurrentUserId(), id, request));
     }
 
     @Operation(summary = "删除佩戴会话", description = "已结束的打卡(MANUAL)/补录(MAKEUP)会话均可删，删除后重算覆盖到的自然日结算；二次确认由前端负责")
     @DeleteMapping("/sessions/{id}")
     public R<TodayWearVO> deleteSession(@PathVariable Long id) {
+        assertWearableUser();
         return R.ok(wearService.deleteSession(SecurityUtil.getCurrentUserId(), id));
     }
 
     @Operation(summary = "读取每日目标", description = "未设置返回默认 20h")
     @GetMapping("/goal")
     public R<GoalVO> getGoal() {
+        assertWearableUser();
         return R.ok(wearService.getGoal(SecurityUtil.getCurrentUserId()));
     }
 
     @Operation(summary = "更新每日目标", description = "goalHours ∈ [18.0, 22.0]，0.5 步进")
     @PutMapping("/goal")
     public R<GoalVO> updateGoal(@Valid @RequestBody GoalUpdateRequest request) {
+        assertWearableUser();
         return R.ok(wearService.updateGoal(SecurityUtil.getCurrentUserId(), request.goalHours()));
     }
 
@@ -112,12 +140,14 @@ public class WearController {
     @GetMapping("/stats")
     public R<WearStatsVO> stats(@RequestParam(required = false) String range,
                                 @RequestParam(required = false) String ym) {
+        assertWearableUser();
         return R.ok(wearService.stats(SecurityUtil.getCurrentUserId(), range, ym));
     }
 
     @Operation(summary = "某副牙套佩戴汇总", description = "换副历史/阶段详情：该副产生的总时长与逐日量")
     @GetMapping("/aligner/{alignerId}/summary")
     public R<WearAlignerSummaryVO> alignerSummary(@PathVariable Long alignerId) {
+        assertWearableUser();
         return R.ok(wearService.alignerSummary(SecurityUtil.getCurrentUserId(), alignerId));
     }
 
@@ -129,6 +159,7 @@ public class WearController {
     public R<ConsultSummaryVO> consultSummary(
             @RequestParam String period,
             @RequestParam(required = false) Long stageId) {
+        assertWearableUser();
         return R.ok(wearService.consultSummary(SecurityUtil.getCurrentUserId(), period, stageId));
     }
 

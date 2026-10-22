@@ -24,6 +24,7 @@ import com.chiji.module.stage.mapper.AlignerMapper;
 import com.chiji.module.stage.mapper.StageMapper;
 import com.chiji.module.stage.mapper.TimelineRecordMapper;
 import com.chiji.module.stage.support.StageModeSupport;
+import com.chiji.module.stage.support.TreatmentGateSupport;
 import com.chiji.module.wear.mapper.WearDailySummaryMapper;
 import com.chiji.module.wear.mapper.WearSessionMapper;
 import com.chiji.module.wear.support.WearTimes;
@@ -94,6 +95,12 @@ public class ProgressReminderServiceImpl implements ProgressReminderService {
     @Override
     public boolean alignerChangeRemind(Long userId) {
         if (!allowed(userId, WearReminderTypeEnum.ALIGNER_CHANGE)) {
+            return false;
+        }
+        // 固定托槽围栏：无「换副」概念，直接跳过（按 user.treatment_type 判定，覆盖
+        // 切换矫正方式前遗留活跃 aligner 的用户——此时旧 CLEAR 阶段仍可能被 loadActiveCtx 命中）
+        User user = userMapper.selectById(userId);
+        if (user != null && TreatmentGateSupport.isFixedBracket(user.getTreatmentType())) {
             return false;
         }
         Ctx ctx = loadActiveCtx(userId);

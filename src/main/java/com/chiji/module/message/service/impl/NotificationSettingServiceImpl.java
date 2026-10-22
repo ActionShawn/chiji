@@ -4,11 +4,13 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.chiji.common.core.exception.BusinessException;
 import com.chiji.common.core.exception.ErrorCode;
 import com.chiji.entity.Message;
+import com.chiji.entity.User;
 import com.chiji.entity.UserNotificationConfig;
 import com.chiji.entity.UserSetting;
 import com.chiji.enums.NotificationPresetEnum;
 import com.chiji.enums.WearReminderTypeEnum;
 import com.chiji.framework.wechat.WxSubscribeClient;
+import com.chiji.module.auth.mapper.UserMapper;
 import com.chiji.module.message.dto.NotificationUpdateRequest;
 import com.chiji.module.message.mapper.MessageMapper;
 import com.chiji.module.message.mapper.UserNotificationConfigMapper;
@@ -18,6 +20,7 @@ import com.chiji.module.message.service.SubscribeQuotaService;
 import com.chiji.module.message.vo.DndSettingVO;
 import com.chiji.module.message.vo.NotificationSettingsVO;
 import com.chiji.module.message.vo.TypeSwitchVO;
+import com.chiji.module.stage.support.TreatmentGateSupport;
 import com.chiji.module.wear.support.WearTimes;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -33,6 +36,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 通知设置服务实现。
@@ -63,11 +67,20 @@ public class NotificationSettingServiceImpl implements NotificationSettingServic
     /** 摘下超时提醒方式缺省值 */
     private static final String DEFAULT_TAKEOFF_MODE = "HALF_HOUR";
 
+    /**
+     * 固定托槽不适用（隐形专属）的提醒类型：换副 + 摘下超时——固定用户无「换副/摘下」概念，
+     * 读取裁剪 items、更新忽略写入（{@code user_notification_config} 遗留行保持原值不动）。
+     */
+    private static final Set<String> ALIGNER_EXCLUSIVE_TYPES = Set.of(
+            WearReminderTypeEnum.ALIGNER_CHANGE.getCode(),
+            WearReminderTypeEnum.TAKEOFF_TIMEOUT.getCode());
+
     private final UserSettingMapper userSettingMapper;
     private final UserNotificationConfigMapper configMapper;
     private final MessageMapper messageMapper;
     private final SubscribeQuotaService subscribeQuotaService;
     private final WxSubscribeClient wxSubscribeClient;
+    private final UserMapper userMapper;
 
     @Override
     public NotificationSettingsVO getSettings(Long userId) {
@@ -75,7 +88,7 @@ public class NotificationSettingServiceImpl implements NotificationSettingServic
                 .eq(UserSetting::getUserId, userId));
         Map<String, Boolean> enabled = effectiveSwitches(userId, loadSwitches(userId));
         String preset = s != null && s.getPresetMode() != null ? s.getPresetMode() : NotificationPresetEnum.STANDARD.getCode();
-        return toVO(userId, s, preset, enabled);
+        return toVO(userId, s, preset, enabled, isFixedUser(userId));
     }
 
     @Override
@@ -85,6 +98,8 @@ public class NotificationSettingServiceImpl implements NotificationSettingServic
         if (req == null) {
             return getSettings(userId);
         }
+        // 0. 固定托槽围栏：换副/摘下相关偏好与类型开关对固定用户无效，读取与写入均按非隐形语义
+        boolean fixedUser = isFixedUser(userId);
         // 1. 单值偏好（局部更新，null 表示不修改）
         if (req.master() != null) {
             s.setNotifMaster(req.master());
@@ -107,10 +122,10 @@ public class NotificationSettingServiceImpl implements NotificationSettingServic
                 s.setDndEnd(parseDndTime(dnd.end()));
             }
         }
-        if (req.alignerRemindTime() != null) {
+        if (req.alignerRemindTime() != null && !fixedUser) {
             s.setAlignerRemindTime(parseAlignerRemindTime(req.alignerRemindTime()));
         }
-        if (req.alignerRemindOffset() != null) {
+        if (req.alignerRemindOffset() != null && !fixedUser) {
             if (!isOffsetValid(req.alignerRemindOffset())) {
                 throw new BusinessException(ErrorCode.NOTIFICATION_PARAM_INVALID, "换副提醒时机不合法");
             }
@@ -134,7 +149,7 @@ public class NotificationSettingServiceImpl implements NotificationSettingServic
             }
             s.setClinicBookOffset(req.clinicBookOffset());
         }
-        if (req.takeoffRemindMode() != null) {
+        if (req.takeoffRemindMode() != null && !fixedUser) {
             if (!TAKEOFF_MODES.contains(req.takeoffRemindMode())) {
                 throw new BusinessException(ErrorCode.NOTIFICATION_PARAM_INVALID, "摘下超时提醒方式不合法");
             }
@@ -148,7 +163,7 @@ public class NotificationSettingServiceImpl implements NotificationSettingServic
                 throw new BusinessException(ErrorCode.NOTIFICATION_PARAM_INVALID, "预设模式不合法");
             }
             s.setPresetMode(preset.getCode());
-            applyTemplate(userId, preset);
+            applyTemplate(userId, preset, fixedUser);
             userSettingMapper.updateById(s);
             return getSettings(userId);
         }
@@ -160,6 +175,10 @@ public class NotificationSettingServiceImpl implements NotificationSettingServic
                 WearReminderTypeEnum type = requireType(item.type());
                 if (item.enabled() == null) {
                     throw new BusinessException(ErrorCode.NOTIFICATION_PARAM_INVALID, "开关取值缺失");
+                }
+                // 固定托槽：隐形专属类型的开关写入直接忽略（遗留行保持原值，不参与预设推导污染）
+                if (fixedUser && ALIGNER_EXCLUSIVE_TYPES.contains(type.getCode())) {
+                    continue;
                 }
                 applied.put(type.getCode(), item.enabled());
             }
@@ -244,8 +263,9 @@ public class NotificationSettingServiceImpl implements NotificationSettingServic
 
     // ───────────────────────────── 内部工具 ─────────────────────────────
 
-    /** 行缺失时按默认值装配整读 VO（不写库）。 */
-    private NotificationSettingsVO toVO(Long userId, UserSetting s, String preset, Map<String, Boolean> enabled) {
+    /** 行缺失时按默认值装配整读 VO（不写库）。固定托槽用户额外裁剪隐形专属类型条目。 */
+    private NotificationSettingsVO toVO(Long userId, UserSetting s, String preset, Map<String, Boolean> enabled,
+                                        boolean fixedUser) {
         boolean master = s == null || s.getNotifMaster() == null || s.getNotifMaster();
         boolean popup = s == null || s.getNotifPopup() == null || s.getNotifPopup();
         boolean badge = s == null || s.getNotifBadge() == null || s.getNotifBadge();
@@ -262,6 +282,10 @@ public class NotificationSettingServiceImpl implements NotificationSettingServic
 
         List<TypeSwitchVO> types = new ArrayList<>();
         for (WearReminderTypeEnum t : WearReminderTypeEnum.values()) {
+            // 固定托槽：隐形专属类型（换副/摘下超时）不下发——固定用户无对应概念与页面入口
+            if (fixedUser && ALIGNER_EXCLUSIVE_TYPES.contains(t.getCode())) {
+                continue;
+            }
             boolean on = enabled.getOrDefault(t.getCode(), t.isDefaultOn());
             types.add(new TypeSwitchVO(t.getCode(), t.getDesc(), t.getGroupName(), on));
         }
@@ -322,8 +346,12 @@ public class NotificationSettingServiceImpl implements NotificationSettingServic
      * 直接 upsert 全量 8 类即可（未变类型写成同值无副作用）；<b>不能</b>「先逻辑删除再插入」：
      * 唯一键 (user_id, reminder_type) 不含 deleted，逻辑删除行仍物理占位，再插入必撞唯一键而失败。
      */
-    private void applyTemplate(Long userId, NotificationPresetEnum preset) {
-        upsertSwitches(userId, templateOf(preset));
+    private void applyTemplate(Long userId, NotificationPresetEnum preset, boolean fixedUser) {
+        Map<String, Boolean> template = templateOf(preset);
+        if (fixedUser) {
+            template.keySet().removeIf(ALIGNER_EXCLUSIVE_TYPES::contains);
+        }
+        upsertSwitches(userId, template);
     }
 
     /**
@@ -469,5 +497,16 @@ public class NotificationSettingServiceImpl implements NotificationSettingServic
             throw new BusinessException(ErrorCode.NOTIFICATION_PARAM_INVALID, "提醒类型不存在");
         }
         return type;
+    }
+
+    /**
+     * 用户是否固定托槽矫正（{@code user.treatment_type} 经 {@link TreatmentGateSupport} 判定；
+     * 用户不存在按非固定处理）。
+     * <p>
+     * 仅 FIXED_BRACKET 走裁剪分支，隐形（CLEAR）用户读写路径与改动前逐字节等价。
+     */
+    private boolean isFixedUser(Long userId) {
+        User user = userMapper.selectById(userId);
+        return user != null && TreatmentGateSupport.isFixedBracket(user.getTreatmentType());
     }
 }
