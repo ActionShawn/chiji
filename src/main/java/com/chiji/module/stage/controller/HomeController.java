@@ -1,6 +1,7 @@
 package com.chiji.module.stage.controller;
 
 import com.chiji.common.core.result.R;
+import com.chiji.enums.RecordModeEnum;
 import com.chiji.module.adjustment.service.AdjustmentRecordService;
 import com.chiji.module.adjustment.vo.FixedAdjustmentPanelVO;
 import com.chiji.module.auth.util.SecurityUtil;
@@ -48,21 +49,29 @@ public class HomeController {
      * 固定托槽用户（BE-FB-09）额外并入橡皮筋面板与复诊调整面板（零新增请求红线）；
      * 门控以 {@code user.treatment_type} 为唯一事实源，隐形用户响应无新增字段（NON_NULL 不序列化）。
      *
-     * @param mode 记录模式编码（CLEAR_SINGLE / CLEAR_DUAL / FIXED_BRACKET，缺省 CLEAR_SINGLE）
+     * @param mode 记录模式编码（CLEAR_SINGLE / CLEAR_DUAL / FIXED_BRACKET，缺省 CLEAR_SINGLE）；
+     *             固定托槽用户服务端强制按 FIXED_BRACKET 过滤（REQ-FB-008，mode 参数仅隐形用户生效）
      * @return 首页聚合数据
      */
     @Operation(summary = "首页聚合数据", description = "按记录模式过滤，一次返回阶段、牙套节点、横幅；固定托槽并入固定面板")
     @GetMapping("/summary")
     public R<HomeSummaryVO> getHomeSummary(@RequestParam(required = false) String mode) {
         Long userId = SecurityUtil.getCurrentUserId();
-        HomeSummaryVO base = homeService.getHomeSummary(userId, mode);
+        String userType = treatmentService.getUserTreatmentType(userId);
+        // REQ-FB-008 两模式数据互不可见（3 轮走查 FIX-5，服务端裁决）：
+        // 固定托槽用户 summary 强制按 FIXED_BRACKET 过滤，不信任前端 mode 参数——
+        // 旧客户端/门控竞态传入 CLEAR_SINGLE 时，隐形旧阶段不再泄漏进固定版首页 active 位；
+        // 隐形用户沿用请求 mode（单/双模工作台偏好，缺省后端按 CLEAR_SINGLE），行为零变化
+        boolean fixedUser = TreatmentGateSupport.isFixedBracket(userType);
+        String effectiveMode = fixedUser ? RecordModeEnum.FIXED_BRACKET.getCode() : mode;
+        HomeSummaryVO base = homeService.getHomeSummary(userId, effectiveMode);
         // 合并佩戴时长概览：无 ACTIVE 副时 wearTop 为 null（前端不渲染佩戴条）
         WearTopVO wearTop = wearService.wearTop(userId);
 
         // 固定托槽面板并入（门控唯一事实源；隐形用户两字段保持 null，响应无新增字段）
         RubberBandRecentVO rubberBand = null;
         FixedAdjustmentPanelVO fixedAdjustments = null;
-        if (TreatmentGateSupport.isFixedBracket(treatmentService.getUserTreatmentType(userId))) {
+        if (fixedUser) {
             rubberBand = rubberBandService.recent(userId);
             FixedAdjustmentPanelVO panel = adjustmentRecordService.panel(userId);
             fixedAdjustments = new FixedAdjustmentPanelVO(
