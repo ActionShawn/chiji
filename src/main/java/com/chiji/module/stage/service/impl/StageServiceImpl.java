@@ -20,8 +20,11 @@ import com.chiji.module.stage.service.StageService;
 import com.chiji.module.stage.service.assembler.AlignerNodeAssembler;
 import com.chiji.module.stage.support.StageModeSupport;
 import com.chiji.module.stage.vo.AlignerNodeVO;
+import com.chiji.module.stage.vo.PlanStepVO;
 import com.chiji.module.stage.vo.StageDetailVO;
 import com.chiji.module.stage.vo.StageVO;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -30,6 +33,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 
@@ -46,6 +51,12 @@ public class StageServiceImpl implements StageService {
 
     /** 「上次编辑 MM.dd HH:mm」格式，与 HomeServiceImpl 保持一致。 */
     private static final DateTimeFormatter EDITED_FMT = DateTimeFormatter.ofPattern("MM.dd HH:mm", Locale.CHINA);
+
+    /** 治疗计划三步区 JSON 序列化器（沿用 adjustment_record.contents 模式；无 Long 字段，无需全局 Jackson 配置）。 */
+    private static final ObjectMapper JSON = new ObjectMapper();
+
+    /** 治疗计划步骤状态允许值：todo(待开始)/active(进行中)/done(已完成)。 */
+    private static final List<String> PLAN_STEP_STATUSES = List.of("todo", "active", "done");
 
     private final StageMapper stageMapper;
     private final AlignerMapper alignerMapper;
@@ -134,6 +145,8 @@ public class StageServiceImpl implements StageService {
         stage.setMode(mode.getCode());
         stage.setName(request.name());
         stage.setStartDate(parseStartDate(request.startDate()));
+        // 固定托槽专属：预估疗程 + 治疗计划三步区（可空，隐形阶段恒 null）
+        applyFixedPlan(stage, request.estimateMonthsMin(), request.estimateMonthsMax(), request.planSteps());
         stage.setStatus(StageStatusEnum.ACTIVE.getCode());
         stage.setSortOrder(sortOrder);
         stageMapper.insert(stage);
@@ -168,10 +181,12 @@ public class StageServiceImpl implements StageService {
     public StageDetailVO updateStage(Long userId, Long stageId, UpdateStageRequest request) {
         Stage stage = loadOwnedStage(userId, stageId);
 
-        // 固定托槽阶段（REQ-FB-003）：仅更新名称与开始日期，count/days 忽略、不触碰 aligner（无 reconcile）
+        // 固定托槽阶段（REQ-FB-003）：仅更新名称 / 开始日期 / 预估疗程 / 治疗计划三步区，
+        // count/days 忽略、不触碰 aligner（无 reconcile）
         if (StageModeSupport.isFixed(stage)) {
             stage.setName(request.name());
             stage.setStartDate(parseStartDate(request.startDate()));
+            applyFixedPlan(stage, request.estimateMonthsMin(), request.estimateMonthsMax(), request.planSteps());
             stageMapper.updateById(stage);
             log.info("编辑固定托槽阶段成功, userId={}, stageId={}, name={}", userId, stageId, stage.getName());
             return toStageDetailVO(stage);
@@ -324,6 +339,86 @@ public class StageServiceImpl implements StageService {
     }
 
     /**
+     * 写入固定托槽专属三字段（预估疗程 + 治疗计划三步区）：create 与 update 共用。
+     * 预估疗程：min/max 至少一项为空时整体置空（无疗程即无进度可算）；仅填一项按「约 X 个月」单值（min=max）；
+     * min>max 时互换（防御容错）。治疗计划：空列表或全空步骤 → 置 null（不落库空数组）。
+     */
+    private void applyFixedPlan(Stage stage, Integer min, Integer max, List<PlanStepVO> planSteps) {
+        stage.setEstimateMonthsMin(normalizeEstimateMin(min, max));
+        stage.setEstimateMonthsMax(normalizeEstimateMax(min, max));
+        stage.setPlanSteps(toPlanJson(planSteps));
+    }
+
+    /** 预估疗程下限归一化：任一侧为空则整体为空；单值填 max 时 min=max；min>max 互换。 */
+    private Integer normalizeEstimateMin(Integer min, Integer max) {
+        if (min == null && max == null) return null;
+        if (min == null) return max;
+        if (max == null) return min;
+        return min <= max ? min : max;
+    }
+
+    /** 预估疗程上限归一化（与 {@link #normalizeEstimateMin} 对称）。 */
+    private Integer normalizeEstimateMax(Integer min, Integer max) {
+        if (min == null && max == null) return null;
+        if (min == null) return max;
+        if (max == null) return min;
+        return min <= max ? max : min;
+    }
+
+    /**
+     * 治疗计划三步区 → JSON 字符串。逐项清洗：标题空则丢弃；说明 trim 后空置 null；
+     * status 非法回退 todo；标题/说明超长截断（DB 列 800 字符兜底）。全空 → null。
+     */
+    private String toPlanJson(List<PlanStepVO> planSteps) {
+        if (planSteps == null || planSteps.isEmpty()) {
+            return null;
+        }
+        List<PlanStepVO> cleaned = new ArrayList<>();
+        for (PlanStepVO step : planSteps) {
+            if (step == null) continue;
+            String title = trimToNull(step.title());
+            if (title == null) continue;
+            if (title.length() > 30) title = title.substring(0, 30);
+            String desc = trimToNull(step.desc());
+            if (desc != null && desc.length() > 200) desc = desc.substring(0, 200);
+            String status = step.status() == null || !PLAN_STEP_STATUSES.contains(step.status()) ? "todo" : step.status();
+            cleaned.add(new PlanStepVO(title, desc, status));
+        }
+        if (cleaned.isEmpty()) {
+            return null;
+        }
+        try {
+            return JSON.writeValueAsString(cleaned);
+        } catch (Exception e) {
+            log.warn("治疗计划序列化失败, err={}", e.getMessage());
+            return null;
+        }
+    }
+
+    /** JSON 字符串 → 治疗计划三步区（解析失败/空 → 空列表，前端据此不渲染）。 */
+    private List<PlanStepVO> fromPlanJson(String json) {
+        if (json == null || json.isBlank()) {
+            return Collections.emptyList();
+        }
+        try {
+            return JSON.readValue(json, new TypeReference<List<PlanStepVO>>() {
+            });
+        } catch (Exception e) {
+            log.warn("治疗计划 JSON 解析失败, planSteps={}, err={}", json, e.getMessage());
+            return Collections.emptyList();
+        }
+    }
+
+    /** 空串归 null（JSON 字段与预估疗程共用）。 */
+    private String trimToNull(String s) {
+        if (s == null) {
+            return null;
+        }
+        String t = s.trim();
+        return t.isEmpty() ? null : t;
+    }
+
+    /**
      * 派生 StageVO，meta/edited 规则与 HomeServiceImpl.toStageVO 保持一致。
      */
     private StageVO toStageVO(Stage stage) {
@@ -363,6 +458,9 @@ public class StageServiceImpl implements StageService {
                 .hardDays(stage.getHardDays())
                 .startDate(stage.getStartDate() == null ? null : stage.getStartDate().toString())
                 .startAlignerNum(startNum)
+                .estimateMonthsMin(stage.getEstimateMonthsMin())
+                .estimateMonthsMax(stage.getEstimateMonthsMax())
+                .planSteps(fromPlanJson(stage.getPlanSteps()))
                 .build();
     }
 }

@@ -56,6 +56,15 @@ public class Stage {
     /** 开始日期（可空；对应「开启新阶段」表单的日期开关） */
     private LocalDate startDate;
 
+    /** 医生预估疗程下限（月，固定托槽专属，可空；形如「约 18–24 个月」的 18） */
+    private Integer estimateMonthsMin;
+
+    /** 医生预估疗程上限（月，固定托槽专属，可空；形如「约 18–24 个月」的 24） */
+    private Integer estimateMonthsMax;
+
+    /** 治疗计划三步区 JSON 字符串（固定托槽专属，可空；[{title,desc,status}]，序列化在服务层） */
+    private String planSteps;
+
     /** 阶段状态：StageStatusEnum.name()，ACTIVE(启用)/ENDED(结束)，同一时间至多一个 ACTIVE（新建默认 ACTIVE） */
     private String status;
 
