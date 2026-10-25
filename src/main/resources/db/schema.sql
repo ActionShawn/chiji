@@ -120,6 +120,21 @@ CREATE TABLE IF NOT EXISTS `rubber_band_record` (
     UNIQUE KEY `uk_rb_user_date` (`user_id`, `record_date`) COMMENT '幂等兜底：同日仅一行'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='橡皮筋每日打卡表';
 
+-- 橡皮筋医嘱（单用户单行，固定托槽专属；BandPage「当前医嘱」卡数据源）
+CREATE TABLE IF NOT EXISTS `rubber_band_prescription` (
+    `id`            BIGINT       NOT NULL COMMENT '主键（雪花算法生成）',
+    `user_id`       BIGINT       NOT NULL COMMENT '所属用户 ID',
+    `traction_type` VARCHAR(20)  DEFAULT NULL COMMENT '牵引类型（如「Ⅱ类牵引」）',
+    `side`          VARCHAR(20)  DEFAULT NULL COMMENT '佩戴侧（左右两侧/仅左侧/仅右侧）',
+    `position`      VARCHAR(50)  DEFAULT NULL COMMENT '佩戴位置（如「上颌尖牙→下颌第一磨牙」）',
+    `daily_target`  INT          DEFAULT NULL COMMENT '每日目标次数（正整数，1-20）',
+    `created_at`    DATETIME     NOT NULL COMMENT '创建时间',
+    `updated_at`    DATETIME     NOT NULL COMMENT '更新时间',
+    `deleted`       TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '逻辑删除：0 正常 / 1 已删除',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_rbp_user` (`user_id`) COMMENT '单用户单行，upsert 兜底'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='橡皮筋医嘱表';
+
 -- 记录媒体
 CREATE TABLE IF NOT EXISTS `record_media` (
     `id`         BIGINT       NOT NULL COMMENT '主键（雪花算法生成）',

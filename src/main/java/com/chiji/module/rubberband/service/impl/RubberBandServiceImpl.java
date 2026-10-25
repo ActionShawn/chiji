@@ -5,12 +5,17 @@ import com.chiji.common.core.exception.ErrorCode;
 import com.chiji.entity.User;
 import com.chiji.module.auth.mapper.UserMapper;
 import com.chiji.module.rubberband.dto.RubberBandDayRow;
+import com.chiji.module.rubberband.dto.RubberBandPrescriptionSaveRequest;
+import com.chiji.module.rubberband.entity.RubberBandPrescription;
 import com.chiji.module.rubberband.entity.RubberBandRecord;
+import com.chiji.module.rubberband.mapper.RubberBandPrescriptionMapper;
 import com.chiji.module.rubberband.mapper.RubberBandRecordMapper;
 import com.chiji.module.rubberband.service.RubberBandService;
 import com.chiji.module.rubberband.vo.RubberBandIncrementVO;
+import com.chiji.module.rubberband.vo.RubberBandPrescriptionVO;
 import com.chiji.module.rubberband.vo.RubberBandRecentVO;
 import com.chiji.module.stage.support.TreatmentGateSupport;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -18,9 +23,12 @@ import org.springframework.stereotype.Service;
 
 import java.time.DayOfWeek;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -51,7 +59,11 @@ public class RubberBandServiceImpl implements RubberBandService {
      */
     private static final int DAILY_LIMIT = 50;
 
+    /** 医嘱更新时间文案「MM.dd」格式。 */
+    private static final DateTimeFormatter PRESCRIPTION_FMT = DateTimeFormatter.ofPattern("MM.dd", Locale.CHINA);
+
     private final RubberBandRecordMapper rubberBandRecordMapper;
+    private final RubberBandPrescriptionMapper rubberBandPrescriptionMapper;
     private final UserMapper userMapper;
 
     @Override
@@ -133,5 +145,72 @@ public class RubberBandServiceImpl implements RubberBandService {
             cursor = cursor.minusDays(1);
         }
         return streak;
+    }
+
+    @Override
+    public RubberBandPrescriptionVO prescription(Long userId) {
+        RubberBandPrescription entity = rubberBandPrescriptionMapper.selectOne(
+                new LambdaQueryWrapper<RubberBandPrescription>().eq(RubberBandPrescription::getUserId, userId));
+        return entity == null ? null : toPrescriptionVO(entity);
+    }
+
+    @Override
+    public RubberBandPrescriptionVO savePrescription(Long userId, RubberBandPrescriptionSaveRequest request) {
+        // 归一化：全字段 trim 后空置 null
+        String tractionType = trimToNull(request.tractionType());
+        String side = trimToNull(request.side());
+        String position = trimToNull(request.position());
+        Integer dailyTarget = request.dailyTarget();
+
+        RubberBandPrescription entity = rubberBandPrescriptionMapper.selectOne(
+                new LambdaQueryWrapper<RubberBandPrescription>().eq(RubberBandPrescription::getUserId, userId));
+
+        // 全字段空 → 视为清空医嘱：逻辑删除该行并返回 null（前端回「去填写」空态）
+        if (tractionType == null && side == null && position == null && dailyTarget == null) {
+            if (entity != null) {
+                rubberBandPrescriptionMapper.deleteById(entity.getId());
+                log.info("橡皮筋医嘱已清空, userId={}", userId);
+            }
+            return null;
+        }
+
+        if (entity == null) {
+            entity = new RubberBandPrescription();
+            entity.setUserId(userId);
+            entity.setTractionType(tractionType);
+            entity.setSide(side);
+            entity.setPosition(position);
+            entity.setDailyTarget(dailyTarget);
+            rubberBandPrescriptionMapper.insert(entity);
+        } else {
+            entity.setTractionType(tractionType);
+            entity.setSide(side);
+            entity.setPosition(position);
+            entity.setDailyTarget(dailyTarget);
+            rubberBandPrescriptionMapper.updateById(entity);
+        }
+        log.info("橡皮筋医嘱已保存, userId={}, tractionType={}, dailyTarget={}", userId, tractionType, dailyTarget);
+        return toPrescriptionVO(entity);
+    }
+
+    /** 实体 → 医嘱 VO（updatedDate 文案「MM.dd」）。 */
+    private RubberBandPrescriptionVO toPrescriptionVO(RubberBandPrescription entity) {
+        LocalDateTime updatedAt = entity.getUpdatedAt() != null ? entity.getUpdatedAt() : entity.getCreatedAt();
+        return new RubberBandPrescriptionVO(
+                entity.getTractionType(),
+                entity.getSide(),
+                entity.getPosition(),
+                entity.getDailyTarget(),
+                updatedAt == null ? "" : updatedAt.format(PRESCRIPTION_FMT)
+        );
+    }
+
+    /** 空串/空白归 null（医嘱字段归一化）。 */
+    private String trimToNull(String s) {
+        if (s == null) {
+            return null;
+        }
+        String t = s.trim();
+        return t.isEmpty() ? null : t;
     }
 }

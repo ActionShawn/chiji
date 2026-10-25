@@ -1,6 +1,8 @@
 package com.chiji.module.rubberband.service;
 
+import com.chiji.module.rubberband.dto.RubberBandPrescriptionSaveRequest;
 import com.chiji.module.rubberband.vo.RubberBandIncrementVO;
+import com.chiji.module.rubberband.vo.RubberBandPrescriptionVO;
 import com.chiji.module.rubberband.vo.RubberBandRecentVO;
 
 /**
@@ -26,4 +28,21 @@ public interface RubberBandService {
      * @return 落库后的当日累计次数
      */
     RubberBandIncrementVO increment(Long userId);
+
+    /**
+     * 查询橡皮筋医嘱（BandPage「当前医嘱」卡）。
+     *
+     * @param userId 当前用户 ID
+     * @return 医嘱 VO；从未设置返回 null（前端据此渲染「去填写」空态）
+     */
+    RubberBandPrescriptionVO prescription(Long userId);
+
+    /**
+     * 保存橡皮筋医嘱（upsert；全字段空则逻辑删除该行并返回 null）。
+     *
+     * @param userId  当前用户 ID
+     * @param request 医嘱保存请求
+     * @return 保存后的医嘱 VO；清空时返回 null
+     */
+    RubberBandPrescriptionVO savePrescription(Long userId, RubberBandPrescriptionSaveRequest request);
 }

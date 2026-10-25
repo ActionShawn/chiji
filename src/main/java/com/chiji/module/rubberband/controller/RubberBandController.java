@@ -2,14 +2,19 @@ package com.chiji.module.rubberband.controller;
 
 import com.chiji.common.core.result.R;
 import com.chiji.module.auth.util.SecurityUtil;
+import com.chiji.module.rubberband.dto.RubberBandPrescriptionSaveRequest;
 import com.chiji.module.rubberband.service.RubberBandService;
 import com.chiji.module.rubberband.vo.RubberBandIncrementVO;
+import com.chiji.module.rubberband.vo.RubberBandPrescriptionVO;
 import com.chiji.module.rubberband.vo.RubberBandRecentVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -54,5 +59,31 @@ public class RubberBandController {
         Long userId = SecurityUtil.getCurrentUserId();
         RubberBandIncrementVO vo = rubberBandService.increment(userId);
         return R.ok(vo, vo.count() != null && vo.count() == 1 ? "已打卡，继续保持～" : "已记一次更换");
+    }
+
+    /**
+     * 查询橡皮筋医嘱（BandPage「当前医嘱」卡）。
+     *
+     * @return 医嘱 VO；从未设置时 data 为 null
+     */
+    @Operation(summary = "查询橡皮筋医嘱", description = "BandPage 当前医嘱卡数据源；从未设置返回 null")
+    @GetMapping("/prescription")
+    public R<RubberBandPrescriptionVO> prescription() {
+        Long userId = SecurityUtil.getCurrentUserId();
+        return R.ok(rubberBandService.prescription(userId));
+    }
+
+    /**
+     * 保存橡皮筋医嘱（upsert；全字段空 = 清空）。
+     *
+     * @param request 医嘱保存请求
+     * @return 保存后的医嘱 VO（清空时 data 为 null）
+     */
+    @Operation(summary = "保存橡皮筋医嘱", description = "牵引类型/佩戴侧/佩戴位置/每日目标次数 upsert；全空即清空")
+    @PutMapping("/prescription")
+    public R<RubberBandPrescriptionVO> savePrescription(@Valid @RequestBody RubberBandPrescriptionSaveRequest request) {
+        Long userId = SecurityUtil.getCurrentUserId();
+        RubberBandPrescriptionVO vo = rubberBandService.savePrescription(userId, request);
+        return R.ok(vo, vo == null ? "医嘱已清空" : "医嘱已保存");
     }
 }
