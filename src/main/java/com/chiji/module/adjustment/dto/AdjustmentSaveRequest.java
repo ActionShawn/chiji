@@ -12,7 +12,7 @@ import java.util.List;
  * <p>
  * 校验规则（服务层落库前校验）：
  * <ul>
- *   <li>contents：预设标签多选（换弓丝/加力/调整皮筋钩/其他），至少一项；
+ *   <li>contents：预设标签多选（粘托槽/换弓丝/加力/调整皮筋钩/拆牙套/其他），至少一项；
  *       取值合法性、选「其他」时 contentExtra 必填均由服务层校验</li>
  *   <li>wireNo：正整数或空（医生未说明时友好留空）</li>
  *   <li>adjustDate：可空（缺省今天）；≤今日（补记不限时间窗，仅禁止未来日期，事项 13 已拍板）</li>
@@ -34,9 +34,9 @@ public record AdjustmentSaveRequest(
         /** 弓丝序号（可选，正整数；不记录传 null） */
         Integer wireNo,
 
-        /** 加力内容标签列表（必填，至少一项：换弓丝/加力/调整皮筋钩/其他） */
+        /** 加力内容标签列表（必填，至少一项：粘托槽/换弓丝/加力/调整皮筋钩/拆牙套/其他） */
         @NotEmpty(message = "请至少选择一项调整内容")
-        @Size(max = 4, message = "调整内容最多4项")
+        @Size(max = 6, message = "调整内容最多6项")
         List<String> contents,
 
         /** 选「其他」时的自定义文本（条件必填，≤200 字） */
@@ -51,8 +51,8 @@ public record AdjustmentSaveRequest(
         String note
 ) {
 
-    /** 预设加力内容标签（记录分类用语，非医疗操作指导）。「其他」需配套 contentExtra。 */
-    public static final List<String> PRESET_CONTENTS = List.of("换弓丝", "加力", "调整皮筋钩", "其他");
+    /** 预设加力内容标签（记录分类用语，非医疗操作指导）。粘托槽/拆牙套各一次（矫正起止），换弓丝/加力可多次。「其他」需配套 contentExtra。 */
+    public static final List<String> PRESET_CONTENTS = List.of("粘托槽", "换弓丝", "加力", "调整皮筋钩", "拆牙套", "其他");
 
     /** 「其他」标签值（选中时 contentExtra 必填） */
     public static final String CONTENT_EXTRA_KEY = "其他";
