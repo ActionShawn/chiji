@@ -55,6 +55,12 @@ public class RecordVO {
     /** 疼痛部位标签列表（仅 PAIN 记录有值，落库 JSON 反序列化后返回；解析失败为 null） */
     private final List<String> painPart;
 
+    /** 托槽脱落情形（仅 BRACKET_OFF 记录有值，如「托槽完全脱落」） */
+    private final String bracketIssue;
+
+    /** 脱落牙位（仅 BRACKET_OFF 记录有值，如「右上4」） */
+    private final String bracketTooth;
+
     /** 标签名列表（如 ["换牙套", "小进步"]） */
     private final List<String> tags;
 

@@ -99,10 +99,16 @@ public class RecordServiceImpl implements RecordService {
             }
         }
 
-        // 3. 疼痛记录判定与校验（REQ-FB-007：painScore/painPart 任一携带即判定为疼痛记录）
+        // 3. 类型判定与校验（疼痛 REQ-FB-007 / 托槽脱落 v2.0；两类互斥）
         boolean isPain = isPainRequest(req);
+        boolean isBracketOff = isBracketOffRequest(req);
+        if (isPain && isBracketOff) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "疼痛与托槽脱落不能同时记录");
+        }
         Integer painScore = null;
         List<String> painPart = null;
+        String bracketIssue = null;
+        String bracketTooth = null;
         String text = req.text();
         if (isPain) {
             // 第 2 批回补放开点：若疼痛开放给隐形用户，仅需调整本处门控调用
@@ -120,6 +126,24 @@ public class RecordServiceImpl implements RecordService {
             // 正文（备注）可空；空时派生中性摘要供时光轴 snippet 兜底
             if (text == null || text.isBlank()) {
                 text = buildPainSummary(painScore, painPart);
+            } else {
+                assertTextLength(text);
+            }
+        } else if (isBracketOff) {
+            // 托槽脱落（v2.0）：与疼痛同构的固定托槽专属类型
+            User user = userMapper.selectById(userId);
+            if (user == null) {
+                throw new BusinessException(ErrorCode.USER_NOT_FOUND);
+            }
+            TreatmentGateSupport.assertFixedBracket(user.getTreatmentType());
+            bracketIssue = assertBracketIssue(req);
+            bracketTooth = normalizeBracketTooth(req.bracketTooth());
+            if (req.wearHours() != null) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "托槽脱落记录不支持同时记录佩戴时长");
+            }
+            // 正文（补充说明）可空；空时派生中性摘要
+            if (text == null || text.isBlank()) {
+                text = buildBracketSummary(bracketIssue, bracketTooth);
             } else {
                 assertTextLength(text);
             }
@@ -151,12 +175,16 @@ public class RecordServiceImpl implements RecordService {
             record.setBadgeType(RecordBadgeTypeEnum.PAIN.getCode());
             record.setPainScore(painScore);
             record.setPainPart(toJsonArray(painPart));
+        } else if (isBracketOff) {
+            record.setBadgeType(RecordBadgeTypeEnum.BRACKET_OFF.getCode());
+            record.setBracketIssue(bracketIssue);
+            record.setBracketTooth(bracketTooth);
         }
         // 其余 badgeType（FOLLOW_UP/MILESTONE/STAGE_SWITCH）由对应链路写入，本接口不开放设置
 
         timelineRecordMapper.insert(record);
-        log.info("记录已保存, userId={}, recordId={}, stageId={}, alignerId={}, mediaKind={}, isPain={}",
-                userId, record.getId(), req.stageId(), alignerId, mediaKind.getCode(), isPain);
+        log.info("记录已保存, userId={}, recordId={}, stageId={}, alignerId={}, mediaKind={}, isPain={}, isBracketOff={}",
+                userId, record.getId(), req.stageId(), alignerId, mediaKind.getCode(), isPain, isBracketOff);
 
         // 6. 处理标签：查找/创建并关联，返回去重后的标签名列表供 VO 展示
         List<String> tagNames = req.tags() != null ? req.tags() : Collections.emptyList();
@@ -180,6 +208,8 @@ public class RecordServiceImpl implements RecordService {
                 .badgeType(record.getBadgeType())
                 .painScore(record.getPainScore())
                 .painPart(painPart)
+                .bracketIssue(record.getBracketIssue())
+                .bracketTooth(record.getBracketTooth())
                 .tags(savedTagNames)
                 .medias(mediaVOs)
                 .mediaUrls(mediaVOs.stream().map(MediaItemVO::getUrl).toList())
@@ -286,10 +316,16 @@ public class RecordServiceImpl implements RecordService {
             throw new BusinessException(ErrorCode.FORBIDDEN, "无权修改该记录");
         }
 
-        // 2. 疼痛判定与校验（与 createRecord 同口径）
+        // 2. 类型判定与校验（与 createRecord 同口径：疼痛 / 托槽脱落互斥）
         boolean isPain = isPainRequest(req);
+        boolean isBracketOff = isBracketOffRequest(req);
+        if (isPain && isBracketOff) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "疼痛与托槽脱落不能同时记录");
+        }
         Integer painScore = null;
         List<String> painPart = null;
+        String bracketIssue = null;
+        String bracketTooth = null;
         String text = req.text();
         if (isPain) {
             // 第 2 批回补放开点：若疼痛开放给隐形用户，仅需调整本处门控调用
@@ -305,6 +341,22 @@ public class RecordServiceImpl implements RecordService {
             }
             if (text == null || text.isBlank()) {
                 text = buildPainSummary(painScore, painPart);
+            } else {
+                assertTextLength(text);
+            }
+        } else if (isBracketOff) {
+            User user = userMapper.selectById(userId);
+            if (user == null) {
+                throw new BusinessException(ErrorCode.USER_NOT_FOUND);
+            }
+            TreatmentGateSupport.assertFixedBracket(user.getTreatmentType());
+            bracketIssue = assertBracketIssue(req);
+            bracketTooth = normalizeBracketTooth(req.bracketTooth());
+            if (req.wearHours() != null) {
+                throw new BusinessException(ErrorCode.BAD_REQUEST, "托槽脱落记录不支持同时记录佩戴时长");
+            }
+            if (text == null || text.isBlank()) {
+                text = buildBracketSummary(bracketIssue, bracketTooth);
             } else {
                 assertTextLength(text);
             }
@@ -326,10 +378,16 @@ public class RecordServiceImpl implements RecordService {
         record.setMediaKind(mediaKind.getCode());
         record.setPainScore(painScore);
         record.setPainPart(painPart != null ? toJsonArray(painPart) : null);
-        // 徽标：编辑为疼痛 → PAIN；由疼痛改回普通 → 清除 PAIN 徽标；其余徽标（里程碑等）保持不变
+        record.setBracketIssue(bracketIssue);
+        record.setBracketTooth(bracketTooth);
+        // 徽标：编辑为疼痛 → PAIN；编辑为托槽脱落 → BRACKET_OFF；
+        // 由这两类改回普通 → 清除对应徽标；其余徽标（里程碑等）保持不变
         if (isPain) {
             record.setBadgeType(RecordBadgeTypeEnum.PAIN.getCode());
-        } else if (RecordBadgeTypeEnum.PAIN.getCode().equals(record.getBadgeType())) {
+        } else if (isBracketOff) {
+            record.setBadgeType(RecordBadgeTypeEnum.BRACKET_OFF.getCode());
+        } else if (RecordBadgeTypeEnum.PAIN.getCode().equals(record.getBadgeType())
+                || RecordBadgeTypeEnum.BRACKET_OFF.getCode().equals(record.getBadgeType())) {
             record.setBadgeType(null);
         }
         timelineRecordMapper.updateById(record);
@@ -497,6 +555,8 @@ public class RecordServiceImpl implements RecordService {
                 .badgeType(record.getBadgeType())
                 .painScore(record.getPainScore())
                 .painPart(fromJsonArray(record.getPainPart()))
+                .bracketIssue(record.getBracketIssue())
+                .bracketTooth(record.getBracketTooth())
                 .tags(tagNames)
                 .medias(medias)
                 .mediaUrls(medias.stream().map(MediaItemVO::getUrl).toList())
@@ -572,6 +632,58 @@ public class RecordServiceImpl implements RecordService {
         StringBuilder sb = new StringBuilder("疼痛 ").append(score).append("/5");
         if (parts != null && !parts.isEmpty()) {
             sb.append(" · 部位：").append(String.join("、", parts));
+        }
+        return sb.toString();
+    }
+
+    // ─────────────────────── 托槽脱落记录（首页改版 v2.0） ───────────────────────
+
+    /**
+     * 判定是否托槽脱落记录：bracketIssue 非空即判定（与疼痛同构的「类型专属字段触发」口径）。
+     */
+    private boolean isBracketOffRequest(CreateRecordRequest req) {
+        return req.bracketIssue() != null && !req.bracketIssue().isBlank();
+    }
+
+    /**
+     * 校验托槽脱落情形：必填且必须命中预设四选一（记录分类用语，非医疗诊断）。
+     */
+    private String assertBracketIssue(CreateRecordRequest req) {
+        String issue = req.bracketIssue() == null ? "" : req.bracketIssue().trim();
+        if (issue.isEmpty()) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "请选择托槽的具体情况");
+        }
+        if (!CreateRecordRequest.BRACKET_ISSUES.contains(issue)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "托槽情况含不支持的取值：" + issue);
+        }
+        return issue;
+    }
+
+    /**
+     * 归一化脱落牙位：trim，空串归 null；长度上限 16（形如「右上4」，含「右上 4」空格变体）。
+     */
+    private String normalizeBracketTooth(String tooth) {
+        if (tooth == null) {
+            return null;
+        }
+        String trimmed = tooth.trim();
+        if (trimmed.isEmpty()) {
+            return null;
+        }
+        if (trimmed.length() > 16) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "牙位最多16字");
+        }
+        return trimmed;
+    }
+
+    /**
+     * 托槽脱落记录正文派生摘要（补充说明为空时的时光轴 snippet 兜底，中性表述无诊断含义）。
+     * 形如「托槽脱落：托槽松动」或「托槽脱落：托槽松动 · 右上4」。
+     */
+    private String buildBracketSummary(String issue, String tooth) {
+        StringBuilder sb = new StringBuilder("托槽脱落：").append(issue);
+        if (tooth != null && !tooth.isEmpty()) {
+            sb.append(" · ").append(tooth);
         }
         return sb.toString();
     }

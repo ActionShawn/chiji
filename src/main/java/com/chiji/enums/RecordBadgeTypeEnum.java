@@ -20,7 +20,9 @@ public enum RecordBadgeTypeEnum implements IEnum<String> {
     /** 疼痛记录（第 1 批仅固定托槽模式开放，REQ-FB-007） */
     PAIN("PAIN", "疼痛记录"),
     /** 复诊调整（复诊调整记录双写时光轴的联动徽标，REQ-FB-004） */
-    ADJUSTMENT("ADJUSTMENT", "复诊调整");
+    ADJUSTMENT("ADJUSTMENT", "复诊调整"),
+    /** 托槽脱落（首页改版 v2.0：固定托槽记录类型，落 bracket_issue/bracket_tooth 载荷） */
+    BRACKET_OFF("BRACKET_OFF", "托槽脱落");
 
     /** 编码（与枚举 name() 一致） */
     private final String code;

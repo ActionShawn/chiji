@@ -54,7 +54,7 @@ public class TimelineRecord {
     /** 佩戴时长（小时，可空；有值时徽标显示「22h」） */
     private Integer wearHours;
 
-    /** 特殊徽标类型：RecordBadgeTypeEnum.name()，FOLLOW_UP/MILESTONE/STAGE_SWITCH/PAIN/ADJUSTMENT（可空，与 wearHours 互斥） */
+    /** 特殊徽标类型：RecordBadgeTypeEnum.name()，FOLLOW_UP/MILESTONE/STAGE_SWITCH/PAIN/ADJUSTMENT/BRACKET_OFF（可空，与 wearHours 互斥） */
     private String badgeType;
 
     /** 疼痛程度 0-5（仅 PAIN 记录有值，与 wearHours 同构的记录类型专属可空载荷） */
@@ -62,6 +62,12 @@ public class TimelineRecord {
 
     /** 疼痛部位 JSON 数组字符串（仅 PAIN 记录有值，如 ["上排","牙龈"]；预设标签+自定义≤20字） */
     private String painPart;
+
+    /** 托槽脱落情形（仅 BRACKET_OFF 记录有值，如「托槽完全脱落」） */
+    private String bracketIssue;
+
+    /** 脱落牙位（仅 BRACKET_OFF 记录有值，如「右上4」） */
+    private String bracketTooth;
 
     /** 创建时间，插入时自动填充 */
     @TableField(fill = FieldFill.INSERT)
