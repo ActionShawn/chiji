@@ -33,7 +33,9 @@ public class TreatmentServiceImpl implements TreatmentService {
 
     @Override
     public List<TreatmentTypeVO> listTreatmentTypes() {
+        // 仅下发已开放的治疗方式（舌侧已并入固定托槽，历史枚举保留但不再对外暴露）
         return Arrays.stream(TreatmentTypeEnum.values())
+                .filter(TreatmentTypeEnum::isAvailable)
                 .map(TreatmentTypeVO::of)
                 .toList();
     }

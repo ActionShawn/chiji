@@ -29,8 +29,8 @@ public interface TreatmentService {
      * app.js onLaunch 时调用，用于路由分发：
      * <ul>
      *   <li>返回 null → 未选择，跳转初始化页</li>
-     *   <li>返回 CLEAR_ALIGNER → 进入隐形矫正首页</li>
-     *   <li>返回 FIXED_BRACKET / LINGUAL → 进入敬请期待页</li>
+     *   <li>返回 CLEAR_ALIGNER / FIXED_BRACKET → 进入对应首页（共用 pages/index，前端门控分流）</li>
+     *   <li>返回 LINGUAL（历史脏数据）→ 前端按固定托槽处理</li>
      * </ul>
      *
      * @param userId 当前用户 ID
