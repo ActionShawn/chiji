@@ -35,7 +35,6 @@ import org.springframework.stereotype.Service;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -67,16 +66,15 @@ public class ProgressReminderServiceImpl implements ProgressReminderService {
             {"新牙套在等你哦 🌙", "昨晚是不是忘了换上呀？今晚换上下一副，矫正不停步，小齿一直陪着你 🌿"},
     };
 
-    /** 微信订阅消息 `thing1`（事项主题，下标 = 时机偏移 + 1，≤20 字符）。 */
-    private static final String[] ALIGNER_WX_THING1 = {
-            "明天要换新牙套啦", "今晚要换新牙套啦", "新牙套在等你哦"};
-    /** 微信订阅消息 `thing12`（备注消息，下标 = 时机偏移 + 1，≤20 字符）。 */
-    private static final String[] ALIGNER_WX_THING12 = {
+    /** 微信订阅消息 `thing3`（温馨提示，下标 = 时机偏移 + 1，≤20 字符）。 */
+    private static final String[] ALIGNER_WX_TIP = {
             "明晚换上下一副，小齿陪着你", "记得换上下一副，小齿陪着你", "昨晚忘换啦？今晚补上，小齿陪你"};
-    /** 微信订阅消息 `time10`（截止时间）格式。 */
-    private static final DateTimeFormatter WX_DEADLINE_FORMAT = DateTimeFormatter.ofPattern("yyyy年M月d日 HH:mm");
-    /** 换副到期日截止时刻（`time10` 统一取到期日 23:59）。 */
-    private static final LocalTime ALIGNER_DEADLINE = LocalTime.of(23, 59);
+    /** 用户已开提醒但无微信订阅额度时，站内消息正文追加的订阅引导提示。 */
+    private static final String WX_PUSH_HINT =
+            "\n\n小提示：你还没订阅微信推送哦，去「通知设置」一键订阅，换副提醒也会同步推送到微信 💌";
+
+    /** 微信订阅消息 `time1`（更换时间，纯日期）格式。 */
+    private static final DateTimeFormatter WX_CHANGE_DATE_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd");
 
     private final NotificationSettingService notificationSettingService;
     private final ReminderNotifyService reminderNotifyService;
@@ -119,10 +117,15 @@ public class ProgressReminderServiceImpl implements ProgressReminderService {
             return false;
         }
         String[] copy = ALIGNER_CHANGE_COPY[offset + 1];
+        // 已开提醒但未订阅微信推送（通道启用且额度为 0）：正文追加订阅引导，帮用户找回辅渠道
+        String body = wxQuotaExhausted(userId) ? copy[1] + WX_PUSH_HINT : copy[1];
         boolean stored = reminderNotifyService.notify(
-                userId, WearReminderTypeEnum.ALIGNER_CHANGE, notifyDate, copy[0], copy[1]);
+                userId, WearReminderTypeEnum.ALIGNER_CHANGE, notifyDate, copy[0], body);
         if (stored) {
-            pushAlignerChange(userId, notifyDate, offset);
+            // thing2 更换副数 = 下一副措辞（单模「第 N 副」/ 双模「第 G 组·软/硬膜」）
+            Integer nextNum = active.getNum() == null ? null : active.getNum() + 1;
+            String nextLabel = nextNum == null ? "下一副" : alignerLabel(ctx.stage(), nextNum);
+            pushAlignerChange(userId, notifyDate, offset, nextLabel);
         }
         return stored;
     }
@@ -419,31 +422,44 @@ public class ProgressReminderServiceImpl implements ProgressReminderService {
     /**
      * 站内落库成功后下发微信一次性订阅消息。
      * <p>
-     * 无额度 / 未配置 / 无 openid / 下发失败一律静默跳过，仅保留站内消息；
+     * 无额度 / 未配置 / 无 openid / 下发失败一律静默跳过，仅保留站内消息（跳过原因均记日志）；
      * 仅当微信返回 {@code errcode == 0} 时才扣减额度并回写消息推送状态。
      */
-    private void pushAlignerChange(Long userId, LocalDate notifyDate, int offset) {
+    private void pushAlignerChange(Long userId, LocalDate notifyDate, int offset, String nextLabel) {
         if (!wxSubscribeClient.isEnabled()) {
+            log.info("换副提醒微信推送跳过：订阅推送通道未启用, userId={}, notifyDate={}", userId, notifyDate);
             return;
         }
         String scene = WearReminderTypeEnum.ALIGNER_CHANGE.getCode();
         if (subscribeQuotaService.remain(userId, scene) <= 0) {
+            log.info("换副提醒微信推送跳过：订阅额度不足（未授权或已耗尽）, userId={}, notifyDate={}", userId, notifyDate);
             return;
         }
         User user = userMapper.selectById(userId);
         String openid = user == null ? null : user.getOpenid();
         if (openid == null || openid.isBlank()) {
+            log.info("换副提醒微信推送跳过：用户无 openid, userId={}, notifyDate={}", userId, notifyDate);
             return;
         }
+        // 更换时间：前一天提醒 = 到期日（明天）；当天 / 后一天提醒 = 提醒日（今晚换/补换）
+        LocalDate changeDate = offset < 0 ? notifyDate.plusDays(1) : notifyDate;
         Map<String, Object> data = new LinkedHashMap<>();
-        data.put("thing1", Map.of("value", ALIGNER_WX_THING1[offset + 1]));
-        data.put("time10", Map.of("value", notifyDate.atTime(ALIGNER_DEADLINE).format(WX_DEADLINE_FORMAT)));
-        data.put("thing12", Map.of("value", ALIGNER_WX_THING12[offset + 1]));
+        data.put("time1", Map.of("value", changeDate.format(WX_CHANGE_DATE_FORMAT)));
+        data.put("thing2", Map.of("value", nextLabel));
+        data.put("thing3", Map.of("value", ALIGNER_WX_TIP[offset + 1]));
         if (!wxSubscribeClient.sendAlignerChangeMessage(openid, data)) {
+            // errcode/errmsg 详情见 WxSubscribeClient 日志（按 openid 关联）
+            log.warn("换副提醒微信订阅消息下发失败, userId={}, notifyDate={}, openid={}", userId, notifyDate, openid);
             return;
         }
         subscribeQuotaService.consumeIfAvailable(userId, scene);
         reminderNotifyService.markPushed(userId, WearReminderTypeEnum.ALIGNER_CHANGE, notifyDate);
+    }
+
+    /** 换副提醒微信推送对当前用户是否已无额度：通道已启用且 ALIGNER_CHANGE 订阅额度 ≤ 0。 */
+    private boolean wxQuotaExhausted(Long userId) {
+        return wxSubscribeClient.isEnabled()
+                && subscribeQuotaService.remain(userId, WearReminderTypeEnum.ALIGNER_CHANGE.getCode()) <= 0;
     }
 
     /** 某日是否有佩戴会话重叠（含当日 00:00 前开始的延续会话）。 */

@@ -38,6 +38,12 @@ import java.util.Map;
 public class ClinicReminderServiceImpl implements ClinicReminderService {
 
     private static final DateTimeFormatter CN_DATE = DateTimeFormatter.ofPattern("M月d日");
+    /** 订阅消息 {@code time1}（复诊 / 预计戴完日期，纯日期）格式。 */
+    private static final DateTimeFormatter WX_DATE_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+    /** 医院 / 医师为空时的订阅消息占位（微信 thing 型关键词不可空）。 */
+    private static final String PLACEHOLDER = "待确认";
+    /** 用户未填备注时 {@code thing13}（提醒事项）的默认友好提示。 */
+    private static final String DEFAULT_REMIND_ITEM = "记得按时到诊，完成后补录就诊记录";
     /** 就诊提醒扫描回看天数上限（提前天数 0~3） */
     private static final int VISIT_LOOKAHEAD_DAYS = 3;
 
@@ -131,26 +137,32 @@ public class ClinicReminderServiceImpl implements ClinicReminderService {
      */
     private void pushClinicVisit(Long userId, ClinicVisit visit) {
         if (!wxSubscribeClient.isClinicVisitEnabled()) {
+            log.info("复诊提醒微信推送跳过：订阅推送通道未启用, userId={}, visitDate={}", userId, visit.getVisitDate());
             return;
         }
         String scene = WearReminderTypeEnum.CLINIC_VISIT_REMIND.getCode();
         if (subscribeQuotaService.remain(userId, scene) <= 0) {
+            log.info("复诊提醒微信推送跳过：订阅额度不足（未授权或已耗尽）, userId={}, visitDate={}", userId, visit.getVisitDate());
             return;
         }
         String openid = openidOf(userId);
         if (openid == null) {
+            log.info("复诊提醒微信推送跳过：用户无 openid, userId={}, visitDate={}", userId, visit.getVisitDate());
             return;
         }
-        // 模板 571「日程提醒」关键词：thing2 提醒内容 / date4 日程时间 / thing10 地点（就诊·预约两场景共用）
+        // 模板 26393「复诊提醒」关键词：time1 复诊日期 / thing3 复诊医院 / thing7 复诊医师 / thing13 提醒事项
+        // （四个关键词下发时均不可空，医院与医师为可空字段，缺省用占位文案兜底）
         Map<String, Object> data = new LinkedHashMap<>();
-        data.put("thing2", Map.of("value", truncate("复诊提醒", 20)));
-        data.put("date4", Map.of("value", visit.getVisitDate().format(DateTimeFormatter.ofPattern("yyyy年M月d日"))));
-        String place = visit.getClinicName() == null ? "线上预留" : visit.getClinicName();
-        if (visit.getDoctorName() != null) {
-            place += " · " + visit.getDoctorName();
-        }
-        data.put("thing10", Map.of("value", truncate(place, 20)));
+        data.put("time1", Map.of("value", visit.getVisitDate().format(WX_DATE_FORMAT)));
+        data.put("thing3", Map.of("value", truncate(
+                isBlank(visit.getClinicName()) ? PLACEHOLDER : visit.getClinicName(), 20)));
+        data.put("thing7", Map.of("value", truncate(
+                isBlank(visit.getDoctorName()) ? PLACEHOLDER : visit.getDoctorName(), 20)));
+        data.put("thing13", Map.of("value", truncate(
+                isBlank(visit.getRemark()) ? DEFAULT_REMIND_ITEM : visit.getRemark().trim(), 20)));
         if (!wxSubscribeClient.sendClinicVisitMessage(openid, data)) {
+            // errcode/errmsg 详情见 WxSubscribeClient 日志（按 openid 关联）
+            log.warn("复诊提醒微信订阅消息下发失败, userId={}, visitDate={}, openid={}", userId, visit.getVisitDate(), openid);
             return;
         }
         subscribeQuotaService.consumeIfAvailable(userId, scene);
@@ -162,23 +174,26 @@ public class ClinicReminderServiceImpl implements ClinicReminderService {
      */
     private void pushClinicBook(Long userId, LocalDate remindDate, int offset) {
         if (!wxSubscribeClient.isClinicBookEnabled()) {
+            log.info("预约提醒微信推送跳过：订阅推送通道未启用, userId={}, remindDate={}", userId, remindDate);
             return;
         }
         String scene = WearReminderTypeEnum.CLINIC_BOOK_REMIND.getCode();
         if (subscribeQuotaService.remain(userId, scene) <= 0) {
+            log.info("预约提醒微信推送跳过：订阅额度不足（未授权或已耗尽）, userId={}, remindDate={}", userId, remindDate);
             return;
         }
         String openid = openidOf(userId);
         if (openid == null) {
+            log.info("预约提醒微信推送跳过：用户无 openid, userId={}, remindDate={}", userId, remindDate);
             return;
         }
-        // 模板 571「日程提醒」关键词：thing2 提醒内容 / date4 日程时间（预计戴完日）/ thing11 备注（建议语）
+        // 模板 42152「待预约提醒」关键词：time1 计划时间（预计戴完日，纯日期）/ thing3 温馨提示
         Map<String, Object> data = new LinkedHashMap<>();
-        data.put("thing2", Map.of("value", truncate("最后一副临近戴完，记得预约复诊", 20)));
-        data.put("date4", Map.of("value",
-                remindDate.plusDays(offset).format(DateTimeFormatter.ofPattern("yyyy年M月d日"))));
-        data.put("thing11", Map.of("value", truncate("确认进度并准备保持器", 20)));
+        data.put("time1", Map.of("value", remindDate.plusDays(offset).format(WX_DATE_FORMAT)));
+        data.put("thing3", Map.of("value", truncate("最后一副临近戴完，记得预约复诊", 20)));
         if (!wxSubscribeClient.sendClinicBookMessage(openid, data)) {
+            // errcode/errmsg 详情见 WxSubscribeClient 日志（按 openid 关联）
+            log.warn("预约提醒微信订阅消息下发失败, userId={}, remindDate={}, openid={}", userId, remindDate, openid);
             return;
         }
         subscribeQuotaService.consumeIfAvailable(userId, scene);
@@ -204,8 +219,16 @@ public class ClinicReminderServiceImpl implements ClinicReminderService {
         return per != null && per >= 0 && per <= 3 ? per : defaultOffset;
     }
 
-    /** 订阅消息 thing 类关键词截断（微信限 20 字符）。 */
+    /** 订阅消息 thing 类关键词截断（微信限 20 字符；按 codePoint 截，避免把 emoji 截半产生非法字符触发 47003）。 */
     private String truncate(String s, int max) {
-        return s.length() <= max ? s : s.substring(0, max);
+        if (s.codePointCount(0, s.length()) <= max) {
+            return s;
+        }
+        return s.substring(0, s.offsetByCodePoints(0, max));
+    }
+
+    /** 空白判定（null 或去空格后为空），用于可空字段兜底占位。 */
+    private boolean isBlank(String s) {
+        return s == null || s.trim().isEmpty();
     }
 }

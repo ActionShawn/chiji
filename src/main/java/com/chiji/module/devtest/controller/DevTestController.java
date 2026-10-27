@@ -13,7 +13,6 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDate;
-import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
@@ -36,15 +35,14 @@ public class DevTestController {
     /** 测试数据时区（与 WearTimes 一致）。 */
     private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
 
-    /** 测试用 `time10`（截止时间）格式，与正式下发一致。 */
-    private static final DateTimeFormatter DEADLINE_FORMAT =
-            DateTimeFormatter.ofPattern("yyyy年M月d日 HH:mm");
+    /** 测试用 `time1`（更换时间，纯日期）格式，与正式下发一致。 */
+    private static final DateTimeFormatter CHANGE_DATE_FORMAT =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd");
 
-    /** 测试用 `thing1` 文案（下标 = 时机偏移 + 1，镜像正式下发 ALIGNER_WX_THING1）。 */
-    private static final String[] THING1 = {
-            "明天要换新牙套啦", "今晚要换新牙套啦", "新牙套在等你哦"};
-    /** 测试用 `thing12` 文案（下标 = 时机偏移 + 1，镜像正式下发 ALIGNER_WX_THING12）。 */
-    private static final String[] THING12 = {
+    /** 测试用 `thing2`（更换副数）示例。 */
+    private static final String THING2 = "第 5 副";
+    /** 测试用 `thing3` 文案（下标 = 时机偏移 + 1，镜像正式下发 ALIGNER_WX_TIP）。 */
+    private static final String[] THING3 = {
             "明晚换上下一副，小齿陪着你", "记得换上下一副，小齿陪着你", "昨晚忘换啦？今晚补上，小齿陪你"};
 
     private final WxSubscribeClient wxSubscribeClient;
@@ -75,14 +73,14 @@ public class DevTestController {
         return R.ok(wxSubscribeClient.trySendAlignerChangeMessage(openid, buildSampleData(offset)));
     }
 
-    /** 构造与正式下发同构的模板数据（thing1 / time10 / thing12，文案按偏移取变体）。 */
+    /** 构造与正式下发同构的模板数据（time1 / thing2 / thing3，文案按偏移取变体）。 */
     private Map<String, Object> buildSampleData(int offset) {
-        String deadline = LocalDate.now(ZONE).plusDays(1)
-                .atTime(LocalTime.of(23, 59)).format(DEADLINE_FORMAT);
+        // 前一天提醒的更换时间为明天，当天/后一天提醒为今天（与正式下发 pushAlignerChange 口径一致）
+        LocalDate changeDate = LocalDate.now(ZONE).plusDays(offset < 0 ? 1 : 0);
         Map<String, Object> data = new LinkedHashMap<>();
-        data.put("thing1", Map.of("value", THING1[offset + 1]));
-        data.put("time10", Map.of("value", deadline));
-        data.put("thing12", Map.of("value", THING12[offset + 1]));
+        data.put("time1", Map.of("value", changeDate.format(CHANGE_DATE_FORMAT)));
+        data.put("thing2", Map.of("value", THING2));
+        data.put("thing3", Map.of("value", THING3[offset + 1]));
         return data;
     }
 }

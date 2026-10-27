@@ -132,7 +132,10 @@ public class WxSubscribeClient {
     }
 
     /**
-     * 下发就诊提醒订阅消息（小齿档案）。
+     * 下发复诊提醒订阅消息（小齿档案）。
+     * <p>
+     * 模板字段约定：time1=复诊日期（{@code yyyy-MM-dd}）、thing3=复诊医院、thing7=复诊医师、
+     * thing13=提醒事项（用户日程备注，无备注给默认友好提示）；四者均不可空，thing 型 ≤20 字符。
      *
      * @param openid 用户 openid
      * @param data   模板数据（须覆盖模板定义的全部关键词，否则微信返回 47003）
@@ -146,6 +149,9 @@ public class WxSubscribeClient {
 
     /**
      * 下发预约提醒订阅消息（小齿档案）。
+     * <p>
+     * 模板字段约定：time1=计划时间（预计戴完日，{@code yyyy-MM-dd}）、thing3=温馨提示；
+     * 两者均不可空，thing 型 ≤20 字符。
      *
      * @param openid 用户 openid
      * @param data   模板数据（须覆盖模板定义的全部关键词，否则微信返回 47003）
@@ -160,8 +166,8 @@ public class WxSubscribeClient {
     /**
      * 下发摘下超时提醒订阅消息（佩戴体验迭代新增通道，模板与换副严格隔离）。
      * <p>
-     * 模板字段约定：thing1=「牙套摘下超时提醒」（固定）、thing4=按提醒方式的最终文案（≤20 字符）、
-     * time6=摘下时刻（{@code yyyy-MM-dd HH:mm}，填摘下时刻非下发时刻）。
+     * 模板字段约定：time1=佩戴时间（摘下时刻，{@code yyyy-MM-dd HH:mm}，填摘下时刻非下发时刻）、
+     * thing2=温馨提醒（按提醒方式的最终文案，≤20 字符）。
      *
      * @param openid 用户 openid
      * @param data   模板数据（须覆盖模板定义的全部关键词，否则微信返回 47003）

@@ -81,12 +81,16 @@ public class TakeoffNotifyServiceImpl implements TakeoffNotifyService {
         }
     }
 
-    /** 模板数据：thing1 固定标题 / thing4 最终文案 / time6 摘下时刻。 */
+    /**
+     * 模板数据：time1 佩戴时间（摘下时刻）/ thing2 温馨提醒（最终文案）。
+     * <p>
+     * 参数 {@code thing4} 为内部延迟任务载荷字段名（沿用旧模板约定，见 {@link TakeoffTimeoutSpec}），
+     * 映射到新模板的 {@code thing2} 关键词；旧模板的 thing1 固定标题字段已随模板更换移除。
+     */
     private Map<String, Object> buildTemplateData(String takeoffAtText, String thing4) {
         Map<String, Object> data = new LinkedHashMap<>();
-        data.put("thing1", Map.of("value", TakeoffTimeoutSpec.THING1));
-        data.put("thing4", Map.of("value", thing4));
-        data.put("time6", Map.of("value", takeoffAtText));
+        data.put("time1", Map.of("value", takeoffAtText));
+        data.put("thing2", Map.of("value", thing4));
         return data;
     }
 }

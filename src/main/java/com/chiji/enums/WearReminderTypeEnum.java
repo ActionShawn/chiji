@@ -17,8 +17,8 @@ import com.baomidou.mybatisplus.annotation.IEnum;
  * 说明：
  * <ul>
  *   <li>WEAR_GUARD（状态守护 / 防挂机）只做页内弹窗提醒，<b>不写信箱消息</b></li>
- *   <li>订阅消息通道：换副提醒（ALIGNER_CHANGE）已开通下发；就诊 / 预约两类模板申请中
- *       （前端 config 占位）；其余类型暂仅信箱归档</li>
+ *   <li>订阅消息通道：换副提醒（ALIGNER_CHANGE）、复诊提醒（CLINIC_VISIT_REMIND）、
+ *       预约提醒（CLINIC_BOOK_REMIND）已开通下发；其余类型暂仅信箱归档</li>
  *   <li>STANDARD 预设 = 各类型 {@link #isDefaultOn()}；IMPORTANT_ONLY 预设仅保留
  *       ALIGNER_CHANGE + WEAR_SETTLE（按需求文档语义，非原型代码行为）</li>
  * </ul>
